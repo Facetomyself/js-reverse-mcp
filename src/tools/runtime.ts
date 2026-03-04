@@ -7,6 +7,7 @@ import {CodeAnalyzer} from '../modules/analyzer/CodeAnalyzer.js';
 import {AISummarizer} from '../modules/analyzer/AISummarizer.js';
 import {Deobfuscator} from '../modules/deobfuscator/Deobfuscator.js';
 import {CryptoDetector} from '../modules/crypto/CryptoDetector.js';
+import {ReverseTaskStore} from '../reverse/ReverseTaskStore.js';
 import {LLMService} from '../services/LLMService.js';
 import {DetailedDataManager} from '../utils/detailedDataManager.js';
 import {UnifiedCacheManager} from '../utils/UnifiedCacheManager.js';
@@ -31,6 +32,7 @@ export interface JSHookRuntime {
   summarizer: AISummarizer;
   deobfuscator: Deobfuscator;
   cryptoDetector: CryptoDetector;
+  reverseTaskStore: ReverseTaskStore;
 }
 
 function toCollectorConfig(): PuppeteerConfig {
@@ -64,6 +66,7 @@ export function getJSHookRuntime(): JSHookRuntime {
   const llmService = new LLMService();
   const detailedDataManager = DetailedDataManager.getInstance();
   const unifiedCacheManager = UnifiedCacheManager.getInstance();
+  const reverseTaskStore = new ReverseTaskStore();
 
   unifiedCacheManager.registerCache(new DetailedDataManagerAdapter(detailedDataManager));
   unifiedCacheManager.registerCache(new CodeCacheAdapter(collector.getCache()));
@@ -80,6 +83,7 @@ export function getJSHookRuntime(): JSHookRuntime {
     summarizer: new AISummarizer(llmService),
     deobfuscator: new Deobfuscator(llmService),
     cryptoDetector: new CryptoDetector(llmService),
+    reverseTaskStore,
   };
 
   return runtime;

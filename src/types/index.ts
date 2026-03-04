@@ -783,6 +783,44 @@ export interface GetScopeVariablesResult {
   successfulScopes: number;
 }
 
+// ==================== Reverse Task Artifacts ====================
+
+export interface ReverseTaskStoreOptions {
+  rootDir?: string;
+}
+
+export interface ReverseTaskOpenInput {
+  taskId: string;
+  slug: string;
+  targetUrl: string;
+  goal: string;
+}
+
+export interface ReverseTaskDescriptor {
+  taskId: string;
+  slug: string;
+  targetUrl: string;
+  goal: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ReverseTaskEvent {
+  stage: string;
+  action: string;
+  status: string;
+  [key: string]: unknown;
+}
+
+export interface ReverseTaskHandle {
+  taskId: string;
+  taskDir: string;
+  descriptor: ReverseTaskDescriptor;
+  appendTimeline(event: ReverseTaskEvent): Promise<void>;
+  appendLog(name: string, value: Record<string, unknown>): Promise<void>;
+  writeSnapshot(name: string, value: unknown): Promise<void>;
+}
+
 // ==================== 全局类型扩展 ====================
 
 declare global {
