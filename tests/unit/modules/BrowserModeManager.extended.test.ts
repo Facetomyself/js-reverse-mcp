@@ -179,7 +179,16 @@ describe('BrowserModeManager extended', () => {
     let injected = 0;
     (StealthScripts2025 as unknown as {injectAll: typeof StealthScripts2025.injectAll}).injectAll = async () => {
       injected += 1;
-      return { scriptCount: 1, injectedScripts: ['x'], errors: [] };
+      return {
+        preset: 'linux-chrome',
+        injectedFeatures: ['x'],
+        skippedFeatures: [],
+        userAgent: 'ua',
+        platform: 'linux',
+        scriptCount: 1,
+        injectedScripts: ['x'],
+        errors: [],
+      };
     };
 
     const manager = new BrowserModeManager({
@@ -376,7 +385,7 @@ describe('BrowserModeManager extended', () => {
         autoLaunch: false,
         useStealthScripts: false,
       });
-      const page: PageHarness = {
+      const page = {
         evaluateOnNewDocument: async (fn: () => void) => {
           fn();
         },
@@ -385,9 +394,12 @@ describe('BrowserModeManager extended', () => {
         setBypassCSP: async () => undefined,
         setJavaScriptEnabled: async () => undefined,
         setCookie: async () => undefined,
+      } as unknown as PageHarness & {
+        evaluateOnNewDocument(fn: () => void): Promise<void>;
       };
       await (manager as unknown as BrowserManagerHarness).injectAntiDetectionScripts(page);
-      assert.strictEqual(globals.navigator?.webdriver, undefined);
+      const navigatorState = globals.navigator as {webdriver?: undefined} | undefined;
+      assert.strictEqual(navigatorState?.webdriver, undefined);
 
       const killer = {
         killed: false,

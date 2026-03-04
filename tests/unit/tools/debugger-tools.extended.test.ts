@@ -1,5 +1,11 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import {
   listScripts,
   getScriptSource,
@@ -29,23 +35,92 @@ import {
   traceFunction,
 } from '../../../src/tools/debugger.js';
 
-function makeResponse() {
+interface DebuggerResponseHarness {
+  lines: string[];
+  appendResponseLine(value: string): void;
+  setIncludePages(value: boolean): void;
+  setIncludeNetworkRequests(value: boolean): void;
+  setIncludeConsoleData(value: boolean): void;
+  attachImage(value: unknown): void;
+  attachNetworkRequest(id: number): void;
+  attachConsoleMessage(id: number): void;
+  setIncludeWebSocketConnections(value: boolean): void;
+  attachWebSocket(id: number): void;
+}
+
+interface ScriptHarness {
+  scriptId: string;
+  url?: string;
+  sourceMapURL?: string;
+}
+
+interface BreakpointHarness {
+  breakpointId: string;
+  url?: string;
+  lineNumber?: number;
+  columnNumber?: number;
+  condition?: string;
+  locations: unknown[];
+}
+
+interface DebuggerContextHarness {
+  isEnabled(): boolean;
+  getScripts(): ScriptHarness[];
+  getScriptsByUrlPattern(pattern: string): ScriptHarness[];
+  getScriptSource(scriptId: string): Promise<string>;
+  getScriptById(scriptId: string): ScriptHarness | undefined;
+  searchInScripts(query: string, options?: unknown): Promise<{matches: Array<{scriptId: string; url?: string; lineNumber: number; lineContent: string}>}>;
+  setBreakpoint(url: string, lineNumber: number, columnNumber: number, condition?: string): Promise<BreakpointHarness>;
+  setBreakpointByUrlRegex(url: string, lineNumber: number, columnNumber: number, condition?: string): Promise<BreakpointHarness>;
+  removeBreakpoint(breakpointId: string): Promise<void>;
+  getBreakpoints(): Array<{breakpointId: string; url: string; lineNumber: number; columnNumber: number; condition?: string; locations: unknown[]}>;
+  getPausedState(): {
+    isPaused: boolean;
+    reason?: string;
+    hitBreakpoints?: string[];
+    callFrames: Array<{
+      functionName?: string;
+      url?: string;
+      callFrameId: string;
+      location: {scriptId: string; lineNumber: number; columnNumber: number};
+      scopeChain?: Array<{type: string; name?: string; object?: {objectId?: string}}>;
+    }>;
+  };
+  isPaused(): boolean;
+  resume(): Promise<void>;
+  pause(): Promise<void>;
+  stepOver(): Promise<void>;
+  stepInto(): Promise<void>;
+  stepOut(): Promise<void>;
+  evaluateOnCallFrame(callFrameId: string, expression: string): Promise<{result?: {value?: unknown}; exceptionDetails?: unknown}>;
+  getScopeVariables(objectId: string, maxDepth?: number): Promise<Array<{name: string; value: unknown}>>;
+  getClient(): {send(method: string, params?: unknown): Promise<unknown>} | null;
+}
+
+interface ToolContextHarness {
+  getSelectedPage(): {evaluate(...args: unknown[]): Promise<unknown>};
+  getNetworkRequestById(): {url(): string};
+  getRequestInitiator(): unknown;
+  debuggerContext: DebuggerContextHarness;
+}
+
+function makeResponse(): DebuggerResponseHarness {
   const lines: string[] = [];
   return {
     lines,
     appendResponseLine: (v: string) => lines.push(v),
-    setIncludePages: () => {},
-    setIncludeNetworkRequests: () => {},
-    setIncludeConsoleData: () => {},
-    attachImage: () => {},
-    attachNetworkRequest: () => {},
-    attachConsoleMessage: () => {},
-    setIncludeWebSocketConnections: () => {},
-    attachWebSocket: () => {},
+    setIncludePages: () => undefined,
+    setIncludeNetworkRequests: () => undefined,
+    setIncludeConsoleData: () => undefined,
+    attachImage: () => undefined,
+    attachNetworkRequest: () => undefined,
+    attachConsoleMessage: () => undefined,
+    setIncludeWebSocketConnections: () => undefined,
+    attachWebSocket: () => undefined,
   };
 }
 
-function makeContext(overrides: Record<string, any> = {}) {
+function makeContext(overrides: Partial<ToolContextHarness> = {}): ToolContextHarness {
   const page = {
     evaluate: async () => ({}),
   };
@@ -55,22 +130,22 @@ function makeContext(overrides: Record<string, any> = {}) {
     getScripts: () => [],
     getScriptsByUrlPattern: () => [],
     getScriptSource: async () => '',
-    getScriptById: () => ({ url: 'https://a.js' }),
+    getScriptById: () => ({ scriptId: '1', url: 'https://a.js' }),
     searchInScripts: async () => ({ matches: [] }),
     setBreakpoint: async () => ({ breakpointId: 'bp1', locations: [{ lineNumber: 1 }] }),
     setBreakpointByUrlRegex: async () => ({ breakpointId: 'bp2', locations: [] }),
-    removeBreakpoint: async () => {},
+    removeBreakpoint: async () => undefined,
     getBreakpoints: () => [],
     getPausedState: () => ({ isPaused: false, callFrames: [] }),
     isPaused: () => false,
-    resume: async () => {},
-    pause: async () => {},
-    stepOver: async () => {},
-    stepInto: async () => {},
-    stepOut: async () => {},
+    resume: async () => undefined,
+    pause: async () => undefined,
+    stepOver: async () => undefined,
+    stepInto: async () => undefined,
+    stepOut: async () => undefined,
     evaluateOnCallFrame: async () => ({ result: { value: 1 } }),
     getScopeVariables: async () => [],
-    getClient: () => ({ send: async () => {} }),
+    getClient: () => ({ send: async () => undefined }),
   };
 
   return {
@@ -79,7 +154,7 @@ function makeContext(overrides: Record<string, any> = {}) {
     getRequestInitiator: () => undefined,
     debuggerContext,
     ...overrides,
-  } as any;
+  };
 }
 
 describe('debugger tools extended', () => {
@@ -90,10 +165,10 @@ describe('debugger tools extended', () => {
     context.debuggerContext.getScriptsByUrlPattern = () => [{ scriptId: '2', url: 'https://b.js' }];
     context.debuggerContext.getScriptSource = async () => 'line1\nline2\nconst x = 1;';
 
-    await listScripts.handler({ params: {} } as any, response as any, context);
-    await listScripts.handler({ params: { filter: 'b' } } as any, response as any, context);
-    await getScriptSource.handler({ params: { scriptId: '2', startLine: 1, endLine: 2, length: 1000 } } as any, response as any, context);
-    await getScriptSource.handler({ params: { scriptId: '2', offset: 1, length: 5 } } as any, response as any, context);
+    await listScripts.handler({ params: {} }, response as unknown as Parameters<typeof listScripts.handler>[1], context as unknown as Parameters<typeof listScripts.handler>[2]);
+    await listScripts.handler({ params: { filter: 'b' } }, response as unknown as Parameters<typeof listScripts.handler>[1], context as unknown as Parameters<typeof listScripts.handler>[2]);
+    await getScriptSource.handler({ params: { scriptId: '2', startLine: 1, endLine: 2, length: 1000 } }, response as unknown as Parameters<typeof getScriptSource.handler>[1], context as unknown as Parameters<typeof getScriptSource.handler>[2]);
+    await getScriptSource.handler({ params: { scriptId: '2', offset: 1, length: 5 } }, response as unknown as Parameters<typeof getScriptSource.handler>[1], context as unknown as Parameters<typeof getScriptSource.handler>[2]);
 
     assert.ok(response.lines.some((x) => x.includes('Found')));
     assert.ok(response.lines.some((x) => x.includes('Source for script')));
@@ -111,19 +186,19 @@ describe('debugger tools extended', () => {
     });
 
     await findInScript.handler(
-      { params: { scriptId: '1', query: 'abc', contextChars: 3, occurrence: 2, caseSensitive: true } } as any,
-      response as any,
-      context,
+      { params: { scriptId: '1', query: 'abc', contextChars: 3, occurrence: 2, caseSensitive: true } },
+      response as unknown as Parameters<typeof findInScript.handler>[1],
+      context as unknown as Parameters<typeof findInScript.handler>[2],
     );
     await findInScript.handler(
-      { params: { scriptId: '1', query: 'zzz', contextChars: 3, occurrence: 1, caseSensitive: true } } as any,
-      response as any,
-      context,
+      { params: { scriptId: '1', query: 'zzz', contextChars: 3, occurrence: 1, caseSensitive: true } },
+      response as unknown as Parameters<typeof findInScript.handler>[1],
+      context as unknown as Parameters<typeof findInScript.handler>[2],
     );
     await searchInSources.handler(
-      { params: { query: 'token', caseSensitive: false, isRegex: false, maxResults: 1, maxLineLength: 20, excludeMinified: true, urlFilter: 'a.js' } } as any,
-      response as any,
-      context,
+      { params: { query: 'token', caseSensitive: false, isRegex: false, maxResults: 1, maxLineLength: 20, excludeMinified: true, urlFilter: 'a.js' } },
+      response as unknown as Parameters<typeof searchInSources.handler>[1],
+      context as unknown as Parameters<typeof searchInSources.handler>[2],
     );
 
     assert.ok(response.lines.some((x) => x.includes('Found "abc"')));
@@ -148,11 +223,11 @@ describe('debugger tools extended', () => {
       },
     });
 
-    await setBreakpoint.handler({ params: { url: 'a.js', lineNumber: 3, columnNumber: 0, isRegex: false } } as any, response as any, context);
-    await setBreakpoint.handler({ params: { url: '.*a.js', lineNumber: 3, columnNumber: 0, isRegex: true } } as any, response as any, context);
-    await listBreakpoints.handler({ params: {} } as any, response as any, context);
-    await removeBreakpoint.handler({ params: { breakpointId: 'bp-1' } } as any, response as any, context);
-    await getRequestInitiator.handler({ params: { requestId: 1 } } as any, response as any, context);
+    await setBreakpoint.handler({ params: { url: 'a.js', lineNumber: 3, columnNumber: 0, isRegex: false } }, response as unknown as Parameters<typeof setBreakpoint.handler>[1], context as unknown as Parameters<typeof setBreakpoint.handler>[2]);
+    await setBreakpoint.handler({ params: { url: '.*a.js', lineNumber: 3, columnNumber: 0, isRegex: true } }, response as unknown as Parameters<typeof setBreakpoint.handler>[1], context as unknown as Parameters<typeof setBreakpoint.handler>[2]);
+    await listBreakpoints.handler({ params: {} }, response as unknown as Parameters<typeof listBreakpoints.handler>[1], context as unknown as Parameters<typeof listBreakpoints.handler>[2]);
+    await removeBreakpoint.handler({ params: { breakpointId: 'bp-1' } }, response as unknown as Parameters<typeof removeBreakpoint.handler>[1], context as unknown as Parameters<typeof removeBreakpoint.handler>[2]);
+    await getRequestInitiator.handler({ params: { requestId: 1 } }, response as unknown as Parameters<typeof getRequestInitiator.handler>[1], context as unknown as Parameters<typeof getRequestInitiator.handler>[2]);
 
     assert.ok(response.lines.some((x) => x.includes('Breakpoint set successfully')));
     assert.ok(response.lines.some((x) => x.includes('Active breakpoints')));
@@ -180,15 +255,15 @@ describe('debugger tools extended', () => {
     context.debuggerContext.getScopeVariables = async () => [{ name: 'x', value: 1 }];
     context.debuggerContext.evaluateOnCallFrame = async () => ({ result: { value: { ok: true } } });
 
-    await getPausedInfo.handler({ params: { includeScopes: true, maxScopeDepth: 2 } } as any, response as any, context);
-    await evaluateOnCallframe.handler({ params: { expression: 'x', frameIndex: 0 } } as any, response as any, context);
-    await resume.handler({ params: {} } as any, response as any, context);
-    await stepOver.handler({ params: {} } as any, response as any, context);
-    await stepInto.handler({ params: {} } as any, response as any, context);
-    await stepOut.handler({ params: {} } as any, response as any, context);
+    await getPausedInfo.handler({ params: { includeScopes: true, maxScopeDepth: 2 } }, response as unknown as Parameters<typeof getPausedInfo.handler>[1], context as unknown as Parameters<typeof getPausedInfo.handler>[2]);
+    await evaluateOnCallframe.handler({ params: { expression: 'x', frameIndex: 0 } }, response as unknown as Parameters<typeof evaluateOnCallframe.handler>[1], context as unknown as Parameters<typeof evaluateOnCallframe.handler>[2]);
+    await resume.handler({ params: {} }, response as unknown as Parameters<typeof resume.handler>[1], context as unknown as Parameters<typeof resume.handler>[2]);
+    await stepOver.handler({ params: {} }, response as unknown as Parameters<typeof stepOver.handler>[1], context as unknown as Parameters<typeof stepOver.handler>[2]);
+    await stepInto.handler({ params: {} }, response as unknown as Parameters<typeof stepInto.handler>[1], context as unknown as Parameters<typeof stepInto.handler>[2]);
+    await stepOut.handler({ params: {} }, response as unknown as Parameters<typeof stepOut.handler>[1], context as unknown as Parameters<typeof stepOut.handler>[2]);
 
     context.debuggerContext.isPaused = () => false;
-    await pause.handler({ params: {} } as any, response as any, context);
+    await pause.handler({ params: {} }, response as unknown as Parameters<typeof pause.handler>[1], context as unknown as Parameters<typeof pause.handler>[2]);
 
     assert.ok(response.lines.some((x) => x.includes('Execution Paused')));
     assert.ok(response.lines.some((x) => x.includes('Result')));
@@ -229,14 +304,14 @@ describe('debugger tools extended', () => {
     context.debuggerContext.setBreakpoint = async () => ({ breakpointId: 'trace-bp', locations: [{}] });
 
     await setBreakpointOnText.handler(
-      { params: { text: 'targetFn', occurrence: 1, condition: 'a>0' } } as any,
-      response as any,
-      context,
+      { params: { text: 'targetFn', occurrence: 1, condition: 'a>0' } },
+      response as unknown as Parameters<typeof setBreakpointOnText.handler>[1],
+      context as unknown as Parameters<typeof setBreakpointOnText.handler>[2],
     );
     await traceFunction.handler(
-      { params: { functionName: 'targetFn', logArgs: true, logThis: true, pause: false } } as any,
-      response as any,
-      context,
+      { params: { functionName: 'targetFn', logArgs: true, logThis: true, pause: false } },
+      response as unknown as Parameters<typeof traceFunction.handler>[1],
+      context as unknown as Parameters<typeof traceFunction.handler>[2],
     );
 
     assert.ok(response.lines.some((x) => x.includes('Breakpoint set successfully')));
@@ -270,13 +345,13 @@ describe('debugger tools extended', () => {
       }),
     });
 
-    await hookFunction.handler({ params: { target: 'window.fetch', logArgs: true, logResult: true, logStack: false } } as any, response as any, context);
-    await listHooks.handler({ params: {} } as any, response as any, context);
-    await unhookFunction.handler({ params: { hookId: 'h1' } } as any, response as any, context);
-    await inspectObject.handler({ params: { expression: 'window', depth: 1, showMethods: true, showPrototype: true } } as any, response as any, context);
-    await getStorage.handler({ params: { type: 'all', filter: 'tok' } } as any, response as any, context);
-    await monitorEvents.handler({ params: { selector: 'window', events: ['click', 'keydown'], monitorId: 'm1' } } as any, response as any, context);
-    await stopMonitor.handler({ params: { monitorId: 'm1' } } as any, response as any, context);
+    await hookFunction.handler({ params: { target: 'window.fetch', logArgs: true, logResult: true, logStack: false } }, response as unknown as Parameters<typeof hookFunction.handler>[1], context as unknown as Parameters<typeof hookFunction.handler>[2]);
+    await listHooks.handler({ params: {} }, response as unknown as Parameters<typeof listHooks.handler>[1], context as unknown as Parameters<typeof listHooks.handler>[2]);
+    await unhookFunction.handler({ params: { hookId: 'h1' } }, response as unknown as Parameters<typeof unhookFunction.handler>[1], context as unknown as Parameters<typeof unhookFunction.handler>[2]);
+    await inspectObject.handler({ params: { expression: 'window', depth: 1, showMethods: true, showPrototype: true } }, response as unknown as Parameters<typeof inspectObject.handler>[1], context as unknown as Parameters<typeof inspectObject.handler>[2]);
+    await getStorage.handler({ params: { type: 'all', filter: 'tok' } }, response as unknown as Parameters<typeof getStorage.handler>[1], context as unknown as Parameters<typeof getStorage.handler>[2]);
+    await monitorEvents.handler({ params: { selector: 'window', events: ['click', 'keydown'], monitorId: 'm1' } }, response as unknown as Parameters<typeof monitorEvents.handler>[1], context as unknown as Parameters<typeof monitorEvents.handler>[2]);
+    await stopMonitor.handler({ params: { monitorId: 'm1' } }, response as unknown as Parameters<typeof stopMonitor.handler>[1], context as unknown as Parameters<typeof stopMonitor.handler>[2]);
 
     assert.ok(response.lines.some((x) => x.includes('Hook installed successfully')));
     assert.ok(response.lines.some((x) => x.includes('Active hooks')));
@@ -288,10 +363,9 @@ describe('debugger tools extended', () => {
   it('covers XHR breakpoint helpers', async () => {
     const response = makeResponse();
     const context = makeContext();
-    await breakOnXhr.handler({ params: { url: '/api' } } as any, response as any, context);
-    await removeXhrBreakpoint.handler({ params: { url: '/api' } } as any, response as any, context);
+    await breakOnXhr.handler({ params: { url: '/api' } }, response as unknown as Parameters<typeof breakOnXhr.handler>[1], context as unknown as Parameters<typeof breakOnXhr.handler>[2]);
+    await removeXhrBreakpoint.handler({ params: { url: '/api' } }, response as unknown as Parameters<typeof removeXhrBreakpoint.handler>[1], context as unknown as Parameters<typeof removeXhrBreakpoint.handler>[2]);
     assert.ok(response.lines.some((x) => x.includes('XHR breakpoint set')));
     assert.ok(response.lines.some((x) => x.includes('XHR breakpoint removed')));
   });
 });
-
