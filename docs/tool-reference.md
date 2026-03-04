@@ -489,6 +489,10 @@ so returned values have to JSON-serializable.
 **Parameters:**
 
 - `requestId`
+- `taskId`
+- `taskSlug`
+- `targetUrl`
+- `goal`
 
 ### `get_script_source`
 
@@ -583,6 +587,10 @@ so returned values have to JSON-serializable.
 - `selector`
 - `events`
 - `monitorId`
+- `taskId`
+- `taskSlug`
+- `targetUrl`
+- `goal`
 
 ### `pause`
 
@@ -743,6 +751,10 @@ so returned values have to JSON-serializable.
 - `logThis`
 - `pause`
 - `traceId`
+- `taskId`
+- `taskSlug`
+- `targetUrl`
+- `goal`
 
 ### `understand_code`
 

@@ -4,8 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import assert from 'node:assert';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 
+import { ReverseTaskStore } from '../../../src/reverse/ReverseTaskStore.js';
 import {
   listScripts,
   getScriptSource,
@@ -35,6 +39,7 @@ import {
   traceFunction,
 } from '../../../src/tools/debugger.js';
 import { listFrames, selectFrame } from '../../../src/tools/frames.js';
+import { getJSHookRuntime } from '../../../src/tools/runtime.js';
 
 interface DebuggerResponseHarness {
   lines: string[];
@@ -330,6 +335,83 @@ describe('debugger tools extended', () => {
 
     assert.ok(response.lines.some((x) => x.includes('Breakpoint set successfully')));
     assert.ok(response.lines.some((x) => x.includes('Function trace installed')));
+  });
+
+  it('records debugger fallback evidence into reverse task artifacts', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'js-reverse-debugger-evidence-'));
+    const runtime = getJSHookRuntime();
+    const originalStore = runtime.reverseTaskStore;
+    runtime.reverseTaskStore = new ReverseTaskStore({ rootDir });
+
+    try {
+      const response = makeResponse();
+      const context = makeContext({
+        getSelectedPage: () => ({
+          evaluate: async () => undefined,
+          frames: () => [],
+          mainFrame: () => undefined,
+        }),
+        getSelectedFrame: () => ({
+          evaluate: async () => ({ success: true, monitorId: 'm-evidence', eventCount: 1 }),
+        }),
+        getRequestInitiator: () => ({
+          type: 'script',
+          url: 'https://a.js',
+          lineNumber: 4,
+          columnNumber: 2,
+          stack: {
+            callFrames: [{ functionName: 'fn', scriptId: '1', url: 'https://a.js', lineNumber: 1, columnNumber: 1 }],
+          },
+        }),
+      });
+      context.debuggerContext.searchInScripts = async () => ({
+        matches: [{
+          scriptId: '1',
+          url: 'https://a.js',
+          lineNumber: 0,
+          lineContent: 'function targetFn(a){return a;}',
+        }],
+      });
+      context.debuggerContext.getScriptSource = async () => 'function targetFn(a){return a;}';
+      context.debuggerContext.setBreakpoint = async () => ({ breakpointId: 'trace-bp', locations: [{}] });
+
+      const taskParams = {
+        taskId: 'task-debugger-evidence',
+        taskSlug: 'debugger-evidence',
+        targetUrl: 'https://example.com',
+        goal: 'capture fallback evidence',
+      };
+
+      await getRequestInitiator.handler(
+        { params: { requestId: 1, ...taskParams } } as unknown as Parameters<typeof getRequestInitiator.handler>[0],
+        response as unknown as Parameters<typeof getRequestInitiator.handler>[1],
+        context as unknown as Parameters<typeof getRequestInitiator.handler>[2],
+      );
+      await monitorEvents.handler(
+        { params: { selector: 'window', events: ['click'], monitorId: 'm-evidence', ...taskParams } } as unknown as Parameters<typeof monitorEvents.handler>[0],
+        response as unknown as Parameters<typeof monitorEvents.handler>[1],
+        context as unknown as Parameters<typeof monitorEvents.handler>[2],
+      );
+      await traceFunction.handler(
+        { params: { functionName: 'targetFn', pause: false, logArgs: true, logThis: false, ...taskParams } } as unknown as Parameters<typeof traceFunction.handler>[0],
+        response as unknown as Parameters<typeof traceFunction.handler>[1],
+        context as unknown as Parameters<typeof traceFunction.handler>[2],
+      );
+
+      const evidenceLog = (
+        await readFile(path.join(rootDir, 'task-debugger-evidence', 'runtime-evidence.jsonl'), 'utf8')
+      )
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+      assert.ok(evidenceLog.some((entry) => entry.tool === 'get_request_initiator'));
+      assert.ok(evidenceLog.some((entry) => entry.tool === 'monitor_events'));
+      assert.ok(evidenceLog.some((entry) => entry.tool === 'trace_function'));
+    } finally {
+      runtime.reverseTaskStore = originalStore;
+      await rm(rootDir, { recursive: true, force: true });
+    }
   });
 
   it('covers page-eval tools: hook/list/unhook/inspect/storage/monitor', async () => {

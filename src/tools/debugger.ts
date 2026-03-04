@@ -17,6 +17,7 @@
 import {zod} from '../third_party/index.js';
 
 import {ToolCategory} from './categories.js';
+import {getJSHookRuntime} from './runtime.js';
 import {defineTool} from './ToolDefinition.js';
 
 function formatUrlWithSourceMap(url: string, sourceMapURL?: string): string {
@@ -73,6 +74,37 @@ function findSourceMapURLByScriptUrl(
     return debugger_.getScriptById?.(stackFrameMatch.scriptId)?.sourceMapURL;
   }
   return undefined;
+}
+
+const reverseTaskParamsSchema = {
+  taskId: zod.string().optional().describe('Optional reverse task ID for writing durable evidence artifacts.'),
+  taskSlug: zod.string().optional().describe('Optional reverse task slug used when opening the task artifact directory.'),
+  targetUrl: zod.string().optional().describe('Optional target page URL associated with the reverse task.'),
+  goal: zod.string().optional().describe('Optional reverse-engineering goal for the task artifact.'),
+};
+
+type ReverseTaskParams = {
+  taskId?: string;
+  taskSlug?: string;
+  targetUrl?: string;
+  goal?: string;
+};
+
+async function appendDebuggerEvidence(
+  params: ReverseTaskParams,
+  entry: Record<string, unknown>,
+): Promise<void> {
+  if (!params.taskId || !params.taskSlug || !params.targetUrl || !params.goal) {
+    return;
+  }
+  const runtime = getJSHookRuntime();
+  const task = await runtime.reverseTaskStore.openTask({
+    taskId: params.taskId,
+    slug: params.taskSlug,
+    targetUrl: params.targetUrl,
+    goal: params.goal,
+  });
+  await task.appendLog('runtime-evidence', entry);
 }
 
 /**
@@ -783,6 +815,7 @@ export const getRequestInitiator = defineTool({
       .describe(
         'The request ID (from list_network_requests) to get the initiator for.',
       ),
+    ...reverseTaskParamsSchema,
   },
   handler: async (request, response, context) => {
     const {requestId} = request.params;
@@ -857,6 +890,23 @@ export const getRequestInitiator = defineTool({
           }
         }
       }
+
+      await appendDebuggerEvidence(request.params, {
+        tool: 'get_request_initiator',
+        requestId,
+        requestUrl: httpRequest.url(),
+        initiatorType: initiator.type,
+        initiatorUrl: initiator.url,
+        lineNumber: initiator.lineNumber,
+        columnNumber: initiator.columnNumber,
+        callFrames: initiator.stack?.callFrames.map((frame) => ({
+          functionName: frame.functionName || '(anonymous)',
+          url: frame.url,
+          scriptId: frame.scriptId,
+          lineNumber: frame.lineNumber,
+          columnNumber: frame.columnNumber,
+        })) ?? [],
+      });
     } catch (error) {
       response.appendResponseLine(
         `Error getting initiator: ${error instanceof Error ? error.message : String(error)}`,
@@ -2111,6 +2161,7 @@ export const monitorEvents = defineTool({
       .string()
       .optional()
       .describe('Custom ID for this monitor. Used to stop monitoring later.'),
+    ...reverseTaskParamsSchema,
   },
   handler: async (request, response, context) => {
     const {selector, events, monitorId} = request.params;
@@ -2191,6 +2242,13 @@ export const monitorEvents = defineTool({
       if (result && typeof result === 'object') {
         if ((result as {success: boolean}).success) {
           const r = result as {monitorId: string; eventCount: number};
+          await appendDebuggerEvidence(request.params, {
+            tool: 'monitor_events',
+            monitorId: r.monitorId,
+            selector,
+            eventCount: r.eventCount,
+            events: events || defaultEvents,
+          });
           response.appendResponseLine(`✅ Event monitor started!`);
           response.appendResponseLine(`- Monitor ID: ${r.monitorId}`);
           response.appendResponseLine(`- Target: ${selector}`);
@@ -2315,6 +2373,7 @@ export const traceFunction = defineTool({
       .string()
       .optional()
       .describe('Custom ID for this trace. Used to identify in logs.'),
+    ...reverseTaskParamsSchema,
   },
   handler: async (request, response, context) => {
     const debugger_ = context.debuggerContext;
@@ -2443,6 +2502,18 @@ export const traceFunction = defineTool({
         columnNumber,
         condition,
       );
+
+      await appendDebuggerEvidence(request.params, {
+        tool: 'trace_function',
+        traceId: id,
+        functionName,
+        breakpointId: breakpointInfo.breakpointId,
+        location: `${url}:${match.lineNumber + 1}:${columnNumber}`,
+        mode: pause ? 'pause' : 'log',
+        urlFilter: urlFilter ?? null,
+        logArgs,
+        logThis,
+      });
 
       response.appendResponseLine(`✅ Function trace installed!`);
       response.appendResponseLine(`- Trace ID: ${id}`);
