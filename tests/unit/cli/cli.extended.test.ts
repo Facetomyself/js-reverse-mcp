@@ -25,6 +25,7 @@ interface ParsedArgsLike {
   browserUrl?: string;
   wsEndpoint?: string;
   wsHeaders?: Record<string, string>;
+  autoConnect?: boolean;
   channel?: string;
   headless?: boolean;
   isolated?: boolean;
@@ -102,6 +103,17 @@ describe('cli extended coverage', () => {
     assert.strictEqual(byWs.wsEndpoint, 'ws://127.0.0.1:9222/devtools/browser/abc');
     assert.deepStrictEqual(byWs.wsHeaders, { Authorization: 'Bearer token' });
     assert.strictEqual(byWs.channel, undefined);
+  });
+
+  it('parseArguments supports autoConnect without forcing local launch defaults', () => {
+    const parsed = parseArguments('1.2.3', [
+      'node',
+      'cli.js',
+      '--autoConnect',
+    ]) as ParsedArgsLike;
+
+    assert.strictEqual(parsed.autoConnect, true);
+    assert.strictEqual(parsed.channel, undefined);
   });
 
   it('parseArguments supports chrome args, viewport and hidden toggles', () => {

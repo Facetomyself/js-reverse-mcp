@@ -21,6 +21,7 @@ function makePage() {
     select: async () => undefined,
     hover: async () => undefined,
     evaluate: async () => ({}),
+    evaluateOnNewDocument: async () => undefined,
     waitForSelector: async () => undefined,
     waitForNavigation: async () => undefined,
     content: async () => '<html></html>',
@@ -115,6 +116,7 @@ describe('PageController', () => {
     assert.strictEqual(metrics.total, 6);
 
     await controller.injectScript('window.__x=1');
+    await controller.injectScriptOnNewDocument('window.__preload=1');
     await controller.setCookies([{ name: 'sid', value: '1' }]);
     const cookies = await controller.getCookies();
     assert.strictEqual(cookies.length, 1);

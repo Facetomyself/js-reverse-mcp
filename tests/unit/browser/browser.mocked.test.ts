@@ -7,7 +7,7 @@ import assert from 'node:assert';
 import {createWriteStream} from 'node:fs';
 import {afterEach, beforeEach, describe, it} from 'node:test';
 
-import {BrowserManager, launch} from '../../../src/browser.js';
+import {BrowserManager, launch, resolveAutoConnectTarget} from '../../../src/browser.js';
 import {StealthScripts2025, type StealthReport} from '../../../src/modules/stealth/StealthScripts2025.js';
 import {puppeteer} from '../../../src/third_party/index.js';
 
@@ -159,6 +159,36 @@ describe('browser.ts mocked', () => {
       },
       /Failed to connect to remote browser: refused/,
     );
+  });
+
+  it('resolveAutoConnectTarget picks the first reachable devtools endpoint', async () => {
+    const calls: string[] = [];
+    const result = await resolveAutoConnectTarget({
+      candidates: ['http://127.0.0.1:9222', 'http://127.0.0.1:9223'],
+      fetchImpl: async (input: string | URL | globalThis.Request) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.includes('9222')) {
+          throw new Error('refused');
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            Browser: 'Chrome/133',
+            webSocketDebuggerUrl: 'ws://127.0.0.1:9223/devtools/browser/abc',
+          }),
+        } as Response;
+      },
+    });
+
+    assert.deepStrictEqual(calls, [
+      'http://127.0.0.1:9222/json/version',
+      'http://127.0.0.1:9223/json/version',
+    ]);
+    assert.deepStrictEqual(result, {
+      browserURL: 'http://127.0.0.1:9223',
+      wsEndpoint: 'ws://127.0.0.1:9223/devtools/browser/abc',
+    });
   });
 
   it('launchBrowser handles success path and failure wrapping', async () => {

@@ -8,20 +8,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import puppeteerExtra from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+import {StealthScripts2025, type StealthPreset, type StealthInjectionOptions} from './modules/stealth/index.js';
 import {logger} from './logger.js';
 import type {
   Browser,
   ChromeReleaseChannel,
   LaunchOptions,
   Target,
-  Page,
 } from './third_party/index.js';
 import {puppeteer} from './third_party/index.js';
-import puppeteerExtra from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import {StealthScripts2025, type StealthPreset, type StealthInjectionOptions} from './modules/stealth/index.js';
 
-let browser: Browser | undefined;
 let browserManager: BrowserManager | undefined;
 
 function makeTargetFilter() {
@@ -52,13 +51,45 @@ export async function ensureBrowserConnected(options: {
 }) {
   // Use BrowserManager for connection management
   const config: BrowserManagerConfig = {
-    remoteDebuggingUrl: options.browserURL || options.wsEndpoint,
+    browserURL: options.browserURL,
+    wsEndpoint: options.wsEndpoint,
     wsHeaders: options.wsHeaders,
     devtools: options.devtools,
   };
 
   const manager = BrowserManager.getInstance(config);
   return manager.ensureBrowser();
+}
+
+export async function resolveAutoConnectTarget(options?: {
+  candidates?: string[];
+  fetchImpl?: typeof fetch;
+}): Promise<{browserURL: string; wsEndpoint?: string} | undefined> {
+  const candidates = options?.candidates ?? [
+    'http://127.0.0.1:9222',
+    'http://127.0.0.1:9223',
+    'http://127.0.0.1:9224',
+    'http://127.0.0.1:9225',
+  ];
+  const fetchImpl = options?.fetchImpl ?? fetch;
+
+  for (const candidate of candidates) {
+    try {
+      const response = await fetchImpl(`${candidate}/json/version`);
+      if (!response.ok) {
+        continue;
+      }
+      const payload = await response.json() as {webSocketDebuggerUrl?: string};
+      return {
+        browserURL: candidate,
+        wsEndpoint: payload.webSocketDebuggerUrl,
+      };
+    } catch {
+      // Keep probing the next candidate.
+    }
+  }
+
+  return undefined;
 }
 
 interface McpLaunchOptions {
@@ -189,6 +220,8 @@ export interface BrowserManagerConfig {
   executablePath?: string;
   channel?: Channel;
   isolated?: boolean;
+  browserURL?: string;
+  wsEndpoint?: string;
   remoteDebuggingUrl?: string;
   wsHeaders?: Record<string, string>;
   useStealthScripts?: boolean;
@@ -209,16 +242,19 @@ export interface BrowserManagerConfig {
 export class BrowserManager {
   private browser?: Browser;
   private config: BrowserManagerConfig;
-  private stealthInjected: boolean = false;
+  private stealthInjected = false;
   private crashCheckInterval?: NodeJS.Timeout;
-  private isRestarting: boolean = false;
+  private isRestarting = false;
 
   private constructor(config: BrowserManagerConfig) {
+    const remoteDebuggingUrl = config.remoteDebuggingUrl;
     this.config = {
       headless: false,
       isolated: false,
       useStealthScripts: false,
       devtools: false,
+      browserURL: config.browserURL ?? (remoteDebuggingUrl?.startsWith('http') ? remoteDebuggingUrl : undefined),
+      wsEndpoint: config.wsEndpoint ?? (remoteDebuggingUrl?.startsWith('ws') ? remoteDebuggingUrl : undefined),
       ...config,
     };
   }
@@ -257,7 +293,7 @@ export class BrowserManager {
     }
 
     // If we have a remote debugging URL, connect to existing browser
-    if (this.config.remoteDebuggingUrl) {
+    if (this.config.browserURL || this.config.wsEndpoint || this.config.remoteDebuggingUrl) {
       return this.connectToRemoteBrowser();
     }
 
@@ -277,13 +313,18 @@ export class BrowserManager {
    */
   private async connectToRemoteBrowser(): Promise<Browser> {
     try {
-      logger('Connecting to remote browser at:', this.config.remoteDebuggingUrl);
-      
+      logger('Connecting to remote browser at:', this.config.wsEndpoint ?? this.config.browserURL ?? this.config.remoteDebuggingUrl);
+
       const connectOptions: Parameters<typeof puppeteer.connect>[0] = {
-        browserURL: this.config.remoteDebuggingUrl,
         targetFilter: makeTargetFilter(),
         defaultViewport: null,
       };
+
+      if (this.config.wsEndpoint) {
+        connectOptions.browserWSEndpoint = this.config.wsEndpoint;
+      } else {
+        connectOptions.browserURL = this.config.browserURL ?? this.config.remoteDebuggingUrl;
+      }
 
       // Add headers if provided
       if (this.config.wsHeaders) {
@@ -437,7 +478,7 @@ export class BrowserManager {
     this.browser.on('disconnected', () => {
       logger('Browser disconnected');
       if (!this.isRestarting) {
-        this.handleBrowserCrash();
+        void this.handleBrowserCrash();
       }
     });
 
@@ -445,7 +486,7 @@ export class BrowserManager {
     this.crashCheckInterval = setInterval(() => {
       if (this.browser && !this.browser.connected && !this.isRestarting) {
         logger('Browser connection lost, attempting restart');
-        this.handleBrowserCrash();
+        void this.handleBrowserCrash();
       }
     }, 5000); // Check every 5 seconds
   }

@@ -111,6 +111,7 @@ interface CodeCollectorHarness {
   MAX_SINGLE_FILE_SIZE: number;
   cdpSession: unknown;
   cdpListeners: {responseReceived?: (...args: unknown[]) => void};
+  RESPONSE_BODY_TIMEOUT_MS: number;
 }
 
 function makeConfig(overrides: Partial<PuppeteerConfig> = {}): PuppeteerConfig {
@@ -230,6 +231,79 @@ describe('CodeCollector logic', () => {
 
     assert.strictEqual(out.files.length, 1);
     assert.strictEqual(out.files[0]?.url, 'https://cdn.site/app.js');
+    assert.strictEqual(detached, 1);
+    assert.strictEqual(pageClosed, 1);
+  });
+
+  it('times out stalled response body fetches and continues cleanup', async () => {
+    let responseHandler:
+      | ((params: {requestId: string; type: string; response: {url: string; mimeType?: string}}) => Promise<void>)
+      | undefined;
+    let detached = 0;
+    let pageClosed = 0;
+    const cdp = {
+      send: async (cmd: string) => {
+        if (cmd === 'Network.getResponseBody') {
+          return await new Promise(() => undefined);
+        }
+        return {};
+      },
+      on: (event: string, handler: (params: {requestId: string; type: string; response: {url: string; mimeType?: string}}) => Promise<void>) => {
+        if (event === 'Network.responseReceived') {
+          responseHandler = handler;
+        }
+      },
+      off: () => undefined,
+      detach: async () => {
+        detached += 1;
+      },
+    } as CDPHarness;
+    const page: CollectPageHarness = {
+      setDefaultTimeout: () => undefined,
+      setUserAgent: async () => undefined,
+      createCDPSession: async () => cdp,
+      goto: async () => {
+        await responseHandler?.({
+          requestId: 'r-timeout',
+          type: 'Script',
+          response: { url: 'https://cdn.site/slow.js', mimeType: 'application/javascript' },
+        });
+      },
+      close: async () => {
+        pageClosed += 1;
+      },
+      evaluate: async () => [],
+      url: () => 'https://example.com',
+    };
+
+    const collector = makeCollector({
+      newPage: async () => page,
+    });
+    collector.RESPONSE_BODY_TIMEOUT_MS = 10;
+    collector.cache = {
+      get: async () => null,
+      set: async () => undefined,
+      clear: async () => undefined,
+      init: async () => undefined,
+      getStats: async () => ({}),
+    };
+    collector.smartCollector = { smartCollect: async (_page: unknown, files: CodeFile[]) => files };
+    collector.compressor = {
+      shouldCompress: () => false,
+      compressBatch: async () => [],
+      getStats: () => ({ totalOriginalSize: 0, totalCompressedSize: 0, averageRatio: 0, cacheHits: 0, cacheMisses: 0 }),
+    };
+
+    const out = await collector.collect({
+      url: 'https://example.com',
+      includeInline: false,
+      includeServiceWorker: false,
+      includeWebWorker: false,
+      includeDynamic: false,
+      compress: false,
+    }) as {files: CodeFile[]};
+
+    assert.strictEqual(out.files.length, 0);
     assert.strictEqual(detached, 1);
     assert.strictEqual(pageClosed, 1);
   });

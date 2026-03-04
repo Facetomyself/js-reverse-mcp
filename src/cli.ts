@@ -74,6 +74,12 @@ export const cliOptions = {
       }
     },
   },
+  autoConnect: {
+    type: 'boolean',
+    description:
+      'Auto-detect a locally running Chrome DevTools endpoint before launching a new browser.',
+    default: false,
+  },
   headless: {
     type: 'boolean',
     description: 'Whether to run in headless (no UI) mode.',
@@ -163,6 +169,7 @@ export function parseArguments(version: string, argv = process.argv) {
         !args.channel &&
         !args.browserUrl &&
         !args.wsEndpoint &&
+        !args.autoConnect &&
         !args.executablePath
       ) {
         args.channel = 'stable';

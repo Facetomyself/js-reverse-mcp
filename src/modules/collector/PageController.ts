@@ -336,6 +336,21 @@ export class PageController {
   }
 
   /**
+   * 在后续文档创建前注入脚本
+   */
+  async injectScriptOnNewDocument(scriptContent: string): Promise<void> {
+    const page = await this.collector.getActivePage();
+
+    await page.evaluateOnNewDocument((script) => {
+      const scriptElement = document.createElement('script');
+      scriptElement.textContent = script;
+      (document.head ?? document.documentElement).appendChild(scriptElement);
+    }, scriptContent);
+
+    logger.info('Preload script registered for future documents');
+  }
+
+  /**
    * 🆕 设置Cookie
    */
   async setCookies(cookies: Array<{

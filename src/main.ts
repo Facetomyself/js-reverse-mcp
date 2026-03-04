@@ -7,7 +7,7 @@
 import './polyfill.js';
 
 import type {Channel} from './browser.js';
-import {ensureBrowserConnected, ensureBrowserLaunched} from './browser.js';
+import {ensureBrowserConnected, ensureBrowserLaunched, resolveAutoConnectTarget} from './browser.js';
 import {parseArguments} from './cli.js';
 import {features} from './features.js';
 import {loadIssueDescriptions} from './issue-descriptions.js';
@@ -70,11 +70,15 @@ async function getContext(): Promise<McpContext> {
     extraArgs.push(`--proxy-server=${args.proxyServer}`);
   }
   const devtools = args.experimentalDevtools ?? false;
+  const autoConnectTarget =
+    !args.browserUrl && !args.wsEndpoint && args.autoConnect
+      ? await resolveAutoConnectTarget()
+      : undefined;
   const browser =
-    args.browserUrl || args.wsEndpoint
+    args.browserUrl || args.wsEndpoint || autoConnectTarget
       ? await ensureBrowserConnected({
-          browserURL: args.browserUrl,
-          wsEndpoint: args.wsEndpoint,
+          browserURL: args.browserUrl ?? autoConnectTarget?.browserURL,
+          wsEndpoint: args.wsEndpoint ?? autoConnectTarget?.wsEndpoint,
           wsHeaders: args.wsHeaders,
           devtools,
         })

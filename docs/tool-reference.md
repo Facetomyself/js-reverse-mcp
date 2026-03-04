@@ -307,6 +307,14 @@ so returned values have to JSON-serializable.
 
 - `function`
 
+### `inject_preload_script`
+
+**Description:** Register JavaScript that will run on future document loads before page scripts execute. Useful for early hook injection, env patches, and preload instrumentation.
+
+**Parameters:**
+
+- `script`
+
 ### `get_console_message`
 
 **Description:** Gets a console message by its ID. You can get all messages by calling list_console_messages.

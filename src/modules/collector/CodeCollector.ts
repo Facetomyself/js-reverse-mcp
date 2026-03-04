@@ -39,6 +39,7 @@ export class CodeCollector {
   private readonly MAX_RESPONSE_SIZE: number;      // 🆕 单次响应最大大小（而非收集大小）
   private readonly MAX_SINGLE_FILE_SIZE: number;
   private readonly MAX_FILES_CACHE_SIZE: number;   // 🆕 文件缓存最大数量（防止内存泄漏）
+  private RESPONSE_BODY_TIMEOUT_MS: number;
   private readonly userAgent: string;
 
   // 🆕 收集的完整数据存储（支持大型网站）
@@ -70,6 +71,7 @@ export class CodeCollector {
     this.MAX_RESPONSE_SIZE = config.maxTotalContentSize ?? 512 * 1024; // 单次响应512KB
     this.MAX_SINGLE_FILE_SIZE = config.maxSingleFileSize ?? 200 * 1024; // 提高到200KB
     this.MAX_FILES_CACHE_SIZE = 1000;  // 🆕 文件缓存最大1000个（防止内存泄漏）
+    this.RESPONSE_BODY_TIMEOUT_MS = 3000;
 
     this.userAgent = config.userAgent ??
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -127,6 +129,24 @@ export class CodeCollector {
     this.collectedFilesCache.clear();
 
     logger.success('✅ All data cleared');
+  }
+
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timeoutHandle = setTimeout(() => {
+            reject(new Error(message));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    }
   }
 
   /**
@@ -439,9 +459,13 @@ export class CodeCollector {
             }
 
             // 获取响应体
-            const { body, base64Encoded } = await this.cdpSession.send('Network.getResponseBody', {
-              requestId,
-            });
+            const { body, base64Encoded } = await this.withTimeout(
+              this.cdpSession.send('Network.getResponseBody', {
+                requestId,
+              }) as Promise<{body: string; base64Encoded: boolean}>,
+              this.RESPONSE_BODY_TIMEOUT_MS,
+              `Timed out retrieving response body for ${url}`,
+            );
 
             const content = base64Encoded ? Buffer.from(body, 'base64').toString('utf-8') : body;
 

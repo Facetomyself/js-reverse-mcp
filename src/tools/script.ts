@@ -8,6 +8,7 @@ import {zod} from '../third_party/index.js';
 import type {JSHandle} from '../third_party/index.js';
 
 import {ToolCategory} from './categories.js';
+import {getJSHookRuntime} from './runtime.js';
 import {defineTool} from './ToolDefinition.js';
 
 // Default script evaluation timeout in milliseconds (30 seconds)
@@ -76,5 +77,23 @@ Example with arguments: \`(el) => {
         void fn.dispose();
       }
     }
+  },
+});
+
+export const injectPreloadScript = defineTool({
+  name: 'inject_preload_script',
+  description:
+    'Register a JavaScript snippet that will run on future document loads before page scripts execute. Use this for preload hooks, environment patches, and early instrumentation.',
+  annotations: {
+    category: ToolCategory.DEBUGGING,
+    readOnlyHint: false,
+  },
+  schema: {
+    script: zod.string().describe('JavaScript source to register for future document loads.'),
+  },
+  handler: async (request, response) => {
+    const runtime = getJSHookRuntime();
+    await runtime.pageController.injectScriptOnNewDocument(request.params.script);
+    response.appendResponseLine('Preload script registered for future documents.');
   },
 });

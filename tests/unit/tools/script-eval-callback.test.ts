@@ -7,7 +7,8 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { evaluateScript } from '../../../src/tools/script.js';
+import { getJSHookRuntime } from '../../../src/tools/runtime.js';
+import { evaluateScript, injectPreloadScript } from '../../../src/tools/script.js';
 
 interface HandleLike {
   dispose(): Promise<void>;
@@ -91,5 +92,41 @@ describe('evaluate_script callback path', () => {
     assert.strictEqual(disposed, 1);
     assert.ok(lines.some((l) => l.includes('Script ran on page and returned')));
     assert.ok(lines.some((l) => l.includes('{"ok":true}')));
+  });
+
+  it('registers a preload script on future documents', async () => {
+    const lines: string[] = [];
+    let injected: string | undefined;
+
+    const response: ResponseLike = {
+      appendResponseLine: (v: string) => lines.push(v),
+      setIncludePages: () => undefined,
+      setIncludeNetworkRequests: () => undefined,
+      setIncludeConsoleData: () => undefined,
+      attachImage: () => undefined,
+      attachNetworkRequest: () => undefined,
+      attachConsoleMessage: () => undefined,
+      setIncludeWebSocketConnections: () => undefined,
+      attachWebSocket: () => undefined,
+    };
+
+    const runtime = getJSHookRuntime();
+    const originalInject = runtime.pageController.injectScriptOnNewDocument.bind(runtime.pageController);
+    runtime.pageController.injectScriptOnNewDocument = async (scriptContent: string) => {
+      injected = scriptContent;
+    };
+
+    try {
+      await injectPreloadScript.handler(
+        { params: { script: 'window.__preload = 1;' } } as Parameters<typeof injectPreloadScript.handler>[0],
+        response as Parameters<typeof injectPreloadScript.handler>[1],
+        {} as Parameters<typeof injectPreloadScript.handler>[2],
+      );
+    } finally {
+      runtime.pageController.injectScriptOnNewDocument = originalInject;
+    }
+
+    assert.strictEqual(injected, 'window.__preload = 1;');
+    assert.ok(lines.some((line) => line.includes('Preload script registered')));
   });
 });
