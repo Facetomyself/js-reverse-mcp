@@ -1,0 +1,135 @@
+import assert from 'node:assert';
+import {mkdtemp, readFile, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {describe, it} from 'node:test';
+
+import {analyzeTarget, recordReverseEvidence} from '../../../src/tools/analyzer.js';
+import {getHookData} from '../../../src/tools/hook.js';
+import {ReverseTaskStore} from '../../../src/reverse/ReverseTaskStore.js';
+import {getJSHookRuntime} from '../../../src/tools/runtime.js';
+
+function makeResponse() {
+  const lines: string[] = [];
+  return {
+    lines,
+    appendResponseLine: (value: string) => {
+      lines.push(value);
+    },
+  };
+}
+
+function extractFirstJsonBlock(lines: string[]): Record<string, unknown> {
+  const start = lines.indexOf('```json');
+  const end = lines.indexOf('```', start + 1);
+  return JSON.parse(lines.slice(start + 1, end).join('\n')) as Record<string, unknown>;
+}
+
+describe('reverse task tools', () => {
+  it('records reverse evidence and emits rebuild-oriented guidance', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'js-reverse-task-tools-'));
+    const runtime = getJSHookRuntime() as any;
+    const originals = {
+      reverseTaskStore: runtime.reverseTaskStore,
+      collectorCollect: runtime.collector.collect,
+      collectorGetTopPriorityFiles: runtime.collector.getTopPriorityFiles,
+      analyzerUnderstand: runtime.analyzer.understand,
+      cryptoDetect: runtime.cryptoDetector.detect,
+      hookCreate: runtime.hookManager.create,
+      hookRecords: runtime.hookManager.getRecords,
+      replayActions: runtime.pageController.replayActions,
+    };
+
+    runtime.reverseTaskStore = new ReverseTaskStore({rootDir});
+    runtime.collector.collect = async () => ({files: [{url: 'app.js', content: 'function sign(){return 1}', size: 32, type: 'external'}]});
+    runtime.collector.getTopPriorityFiles = () => ({
+      files: [{
+        url: 'top-sign.js',
+        content: 'function signToken(token, nonce){ return token + nonce; } fetch("/api/sign", {method: "POST"})',
+        size: 96,
+        type: 'external',
+      }],
+      totalSize: 96,
+      totalFiles: 1,
+    });
+    runtime.analyzer.understand = async () => ({qualityScore: 88, securityRisks: []});
+    runtime.cryptoDetector.detect = async () => ({algorithms: [{name: 'SHA256'}]});
+    runtime.hookManager.create = ({type}: {type: string}) => ({
+      hookId: `${type}-hook-1`,
+      type,
+      script: `/* ${type} */`,
+    });
+    runtime.hookManager.getRecords = () => ([{
+      target: 'fetch',
+      event: 'request',
+      method: 'POST',
+      url: 'https://example.com/api/sign?token=abc',
+      body: '{"token":"abc","sign":"xyz"}',
+      status: 200,
+      timestamp: Date.now(),
+    }]);
+    runtime.pageController.replayActions = async () => [];
+
+    try {
+      const recordResponse = makeResponse();
+      await recordReverseEvidence.handler({
+        params: {
+          taskId: 'task-001',
+          taskSlug: 'demo',
+          targetUrl: 'https://example.com',
+          goal: 'rebuild signature',
+          channel: 'runtime-evidence',
+          entry: {
+            source: 'hook',
+            note: 'captured sign parameters',
+          },
+        },
+      } as any, recordResponse as any, {} as any);
+
+      const recorded = (
+        await readFile(path.join(rootDir, 'task-001', 'runtime-evidence.jsonl'), 'utf8')
+      )
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      assert.strictEqual(recorded.length, 1);
+      assert.strictEqual(recorded[0].source, 'hook');
+      assert.strictEqual(recorded[0].note, 'captured sign parameters');
+
+      const analyzeResponse = makeResponse();
+      await analyzeTarget.handler({
+        params: {
+          url: 'https://example.com',
+          hookPreset: 'api-signature',
+          autoInjectHooks: false,
+        },
+      } as any, analyzeResponse as any, {} as any);
+      const analyzeJson = extractFirstJsonBlock(analyzeResponse.lines);
+      assert.ok(Array.isArray(analyzeJson.recommendedNextSteps));
+      assert.ok(Array.isArray(analyzeJson.stopIf));
+      assert.ok(Array.isArray(analyzeJson.whyTheseSteps));
+
+      const hookResponse = makeResponse();
+      await getHookData.handler({
+        params: {
+          hookId: 'fetch-hook-1',
+          view: 'summary',
+          maxRecords: 5,
+        },
+      } as any, hookResponse as any, {} as any);
+      const hookJson = extractFirstJsonBlock(hookResponse.lines);
+      assert.ok(Array.isArray(hookJson.candidateEnvNeeds));
+      assert.ok(Array.isArray(hookJson.requestBindings));
+    } finally {
+      runtime.reverseTaskStore = originals.reverseTaskStore;
+      runtime.collector.collect = originals.collectorCollect;
+      runtime.collector.getTopPriorityFiles = originals.collectorGetTopPriorityFiles;
+      runtime.analyzer.understand = originals.analyzerUnderstand;
+      runtime.cryptoDetector.detect = originals.cryptoDetect;
+      runtime.hookManager.create = originals.hookCreate;
+      runtime.hookManager.getRecords = originals.hookRecords;
+      runtime.pageController.replayActions = originals.replayActions;
+      await rm(rootDir, {recursive: true, force: true});
+    }
+  });
+});

@@ -482,6 +482,38 @@ function buildActionPlan(result: {
   return steps;
 }
 
+function buildWhyTheseSteps(input: {
+  requestFingerprints: Array<{fingerprint: string}>;
+  candidateFunctions: string[];
+  hookRecordCount: number;
+}): string[] {
+  return [
+    input.requestFingerprints.length > 0
+      ? `Observed suspicious request fingerprints: ${input.requestFingerprints.slice(0, 2).map((item) => item.fingerprint).join('; ')}`
+      : 'No stable request fingerprint yet, so the next steps keep observation and capture lightweight.',
+    input.candidateFunctions.length > 0
+      ? `Candidate signing functions were found: ${input.candidateFunctions.slice(0, 3).join(', ')}`
+      : 'No obvious signing function names were found, so the workflow should rely on request and hook evidence first.',
+    input.hookRecordCount > 0
+      ? `Hook capture already produced ${input.hookRecordCount} runtime records, enough to start correlation and local rebuild.`
+      : 'Hook capture has not produced data yet, so the workflow should avoid premature local rebuild guesses.',
+  ];
+}
+
+function buildStopConditions(input: {
+  hookRecordCount: number;
+  suspiciousFlowCount: number;
+}): string[] {
+  return [
+    input.suspiciousFlowCount > 0
+      ? 'Stop broadening capture once the target request path is confirmed and export a rebuild bundle.'
+      : 'Stop and trigger the target action if no suspicious request path has been confirmed yet.',
+    input.hookRecordCount > 200
+      ? 'Stop expanding hooks until noisy capture is reduced with summary view or narrower targets.'
+      : 'Stop escalating to breakpoints unless hook evidence still cannot expose the required runtime context.',
+  ];
+}
+
 type AnalyzeTargetParams = zod.infer<zod.ZodObject<{
   url: zod.ZodString;
   topN: zod.ZodOptional<zod.ZodNumber>;
@@ -680,6 +712,16 @@ async function runAnalyzeTargetWorkflow(runtime: ReturnType<typeof getJSHookRunt
       requestSinks: signatureHints.requestSinks,
     },
     actionPlan,
+    recommendedNextSteps: actionPlan,
+    whyTheseSteps: buildWhyTheseSteps({
+      requestFingerprints,
+      candidateFunctions: signatureHints.candidateFunctions,
+      hookRecordCount: hookTimeline.length,
+    }),
+    stopIf: buildStopConditions({
+      hookRecordCount: hookTimeline.length,
+      suspiciousFlowCount: suspiciousFlows.length,
+    }),
     nextActions: [
       crypto.algorithms.length > 0 ? 'Focus on crypto-related files from top-priority list.' : null,
       hookTimeline.length === 0 ? 'Trigger page interactions and rerun get_hook_data / analyze_target.' : null,
@@ -687,6 +729,39 @@ async function runAnalyzeTargetWorkflow(runtime: ReturnType<typeof getJSHookRunt
     ].filter((item): item is string => Boolean(item)),
   };
 }
+
+export const recordReverseEvidence = defineTool({
+  name: 'record_reverse_evidence',
+  description: 'Append structured reverse-engineering evidence to a task artifact log.',
+  annotations: {category: ToolCategory.REVERSE_ENGINEERING, readOnlyHint: false},
+  schema: {
+    taskId: zod.string(),
+    taskSlug: zod.string(),
+    targetUrl: zod.string(),
+    goal: zod.string(),
+    channel: zod.string().default('runtime-evidence'),
+    entry: zod.record(zod.string(), zod.unknown()),
+  },
+  handler: async (request, response) => {
+    const runtime = getJSHookRuntime();
+    const task = await runtime.reverseTaskStore.openTask({
+      taskId: request.params.taskId,
+      slug: request.params.taskSlug,
+      targetUrl: request.params.targetUrl,
+      goal: request.params.goal,
+    });
+    await task.appendLog(request.params.channel, request.params.entry);
+
+    response.appendResponseLine('```json');
+    response.appendResponseLine(JSON.stringify({
+      ok: true,
+      taskId: task.taskId,
+      taskDir: task.taskDir,
+      channel: request.params.channel,
+    }, null, 2));
+    response.appendResponseLine('```');
+  },
+});
 
 export const analyzeTarget = defineTool({
   name: 'analyze_target',

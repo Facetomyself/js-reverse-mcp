@@ -68,6 +68,37 @@ function summarizeHookRecords(records: Array<NormalizedHookRecord>, maxRecords: 
   };
 }
 
+function inferCandidateEnvNeeds(records: Array<NormalizedHookRecord>): string[] {
+  const needs = new Set<string>();
+  for (const record of records) {
+    if (record.url.startsWith('http://') || record.url.startsWith('https://')) {
+      needs.add('location');
+      needs.add('fetch');
+    }
+    if (record.bodySnippet.includes('token') || record.bodySnippet.includes('cookie')) {
+      needs.add('cookie');
+      needs.add('storage');
+    }
+    if (record.bodySnippet.includes('nonce') || record.bodySnippet.includes('timestamp')) {
+      needs.add('Date');
+    }
+  }
+  return Array.from(needs).sort();
+}
+
+function buildRequestBindings(records: Array<NormalizedHookRecord>): Array<Record<string, unknown>> {
+  return records
+    .filter((record) => record.url)
+    .slice(0, 10)
+    .map((record) => ({
+      target: record.target,
+      event: record.event,
+      method: record.method || 'UNKNOWN',
+      url: record.url,
+      status: record.status,
+    }));
+}
+
 export const createHook = defineTool({
   name: 'create_hook',
   description: 'RECOMMENDED: Create hook script for function/fetch/xhr/property/cookie/websocket/eval/timer. Hooks run without pausing page execution and are the preferred approach over breakpoints for monitoring and interception.',
@@ -121,7 +152,11 @@ export const getHookData = defineTool({
       const records = (runtime.hookManager.getRecords(request.params.hookId) as Array<Record<string, unknown>>)
         .map(normalizeHookRecord);
       data = view === 'summary'
-        ? summarizeHookRecords(records, maxRecords)
+        ? {
+            ...summarizeHookRecords(records, maxRecords),
+            candidateEnvNeeds: inferCandidateEnvNeeds(records),
+            requestBindings: buildRequestBindings(records),
+          }
         : records;
     } else if (view === 'summary') {
       const hooks = runtime.hookManager.getAllHooks();
@@ -131,6 +166,8 @@ export const getHookData = defineTool({
         return {
           hookId: hook.hookId,
           ...summarizeHookRecords(records, maxRecords),
+          candidateEnvNeeds: inferCandidateEnvNeeds(records),
+          requestBindings: buildRequestBindings(records),
         };
       });
     } else {
