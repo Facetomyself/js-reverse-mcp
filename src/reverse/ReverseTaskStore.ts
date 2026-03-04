@@ -1,3 +1,9 @@
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import {appendFile, mkdir, readFile, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 

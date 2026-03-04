@@ -1,9 +1,16 @@
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import {zod} from '../third_party/index.js';
-import {defineTool} from './ToolDefinition.js';
+
 import {ToolCategory} from './categories.js';
 import {getJSHookRuntime} from './runtime.js';
+import {defineTool} from './ToolDefinition.js';
 
-type NormalizedHookRecord = {
+interface NormalizedHookRecord {
   target: string;
   event: string;
   method: string;
@@ -11,7 +18,7 @@ type NormalizedHookRecord = {
   status?: number;
   bodySnippet: string;
   timestamp?: number;
-};
+}
 
 function normalizeHookRecord(record: Record<string, unknown>): NormalizedHookRecord {
   const body = typeof record.body === 'string'
@@ -37,13 +44,13 @@ function normalizeRecordForDedupe(record: NormalizedHookRecord): {key: string; s
   return {key, summary: record};
 }
 
-function summarizeHookRecords(records: Array<NormalizedHookRecord>, maxRecords: number): {
+function summarizeHookRecords(records: NormalizedHookRecord[], maxRecords: number): {
   total: number;
   unique: number;
   dropped: number;
   records: Array<Record<string, unknown>>;
 } {
-  const byKey = new Map<string, {count: number; sample: Record<string, unknown>}>();
+  const byKey = new Map<string, {count: number; sample: NormalizedHookRecord}>();
   for (const record of records) {
     const normalized = normalizeRecordForDedupe(record);
     const existing = byKey.get(normalized.key);
@@ -55,7 +62,7 @@ function summarizeHookRecords(records: Array<NormalizedHookRecord>, maxRecords: 
   }
 
   const deduped = Array.from(byKey.values()).map((item) => ({
-    ...item.sample,
+    ...(item.sample as unknown as Record<string, unknown>),
     count: item.count,
   }));
   deduped.sort((a, b) => Number(b.count) - Number(a.count));
@@ -68,7 +75,7 @@ function summarizeHookRecords(records: Array<NormalizedHookRecord>, maxRecords: 
   };
 }
 
-function inferCandidateEnvNeeds(records: Array<NormalizedHookRecord>): string[] {
+function inferCandidateEnvNeeds(records: NormalizedHookRecord[]): string[] {
   const needs = new Set<string>();
   for (const record of records) {
     if (record.url.startsWith('http://') || record.url.startsWith('https://')) {
@@ -86,7 +93,7 @@ function inferCandidateEnvNeeds(records: Array<NormalizedHookRecord>): string[] 
   return Array.from(needs).sort();
 }
 
-function buildRequestBindings(records: Array<NormalizedHookRecord>): Array<Record<string, unknown>> {
+function buildRequestBindings(records: NormalizedHookRecord[]): Array<Record<string, unknown>> {
   return records
     .filter((record) => record.url)
     .slice(0, 10)

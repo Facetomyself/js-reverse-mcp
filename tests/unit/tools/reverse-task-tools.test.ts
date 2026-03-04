@@ -1,15 +1,27 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import assert from 'node:assert';
 import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {describe, it} from 'node:test';
 
+import {ReverseTaskStore} from '../../../src/reverse/ReverseTaskStore.js';
 import {analyzeTarget, recordReverseEvidence} from '../../../src/tools/analyzer.js';
 import {getHookData} from '../../../src/tools/hook.js';
-import {ReverseTaskStore} from '../../../src/reverse/ReverseTaskStore.js';
 import {getJSHookRuntime} from '../../../src/tools/runtime.js';
+import type {CollectCodeResult, DetectCryptoResult, UnderstandCodeResult} from '../../../src/types/index.js';
 
-function makeResponse() {
+interface ResponseShape {
+  lines: string[];
+  appendResponseLine(value: string): void;
+}
+
+function makeResponse(): ResponseShape {
   const lines: string[] = [];
   return {
     lines,
@@ -28,7 +40,7 @@ function extractFirstJsonBlock(lines: string[]): Record<string, unknown> {
 describe('reverse task tools', () => {
   it('records reverse evidence and emits rebuild-oriented guidance', async () => {
     const rootDir = await mkdtemp(path.join(tmpdir(), 'js-reverse-task-tools-'));
-    const runtime = getJSHookRuntime() as any;
+    const runtime = getJSHookRuntime();
     const originals = {
       reverseTaskStore: runtime.reverseTaskStore,
       collectorCollect: runtime.collector.collect,
@@ -41,7 +53,12 @@ describe('reverse task tools', () => {
     };
 
     runtime.reverseTaskStore = new ReverseTaskStore({rootDir});
-    runtime.collector.collect = async () => ({files: [{url: 'app.js', content: 'function sign(){return 1}', size: 32, type: 'external'}]});
+    runtime.collector.collect = async (): Promise<CollectCodeResult> => ({
+      files: [{url: 'app.js', content: 'function sign(){return 1}', size: 32, type: 'external'}],
+      dependencies: {nodes: [], edges: []},
+      totalSize: 32,
+      collectTime: 1,
+    });
     runtime.collector.getTopPriorityFiles = () => ({
       files: [{
         url: 'top-sign.js',
@@ -52,14 +69,32 @@ describe('reverse task tools', () => {
       totalSize: 96,
       totalFiles: 1,
     });
-    runtime.analyzer.understand = async () => ({qualityScore: 88, securityRisks: []});
-    runtime.cryptoDetector.detect = async () => ({algorithms: [{name: 'SHA256'}]});
+    runtime.analyzer.understand = async (): Promise<UnderstandCodeResult> => ({
+      structure: {functions: [], classes: [], modules: [], callGraph: {nodes: [], edges: []}},
+      techStack: {other: []},
+      businessLogic: {mainFeatures: [], entities: [], rules: [], dataModel: {}},
+      dataFlow: {graph: {nodes: [], edges: []}, sources: [], sinks: [], taintPaths: []},
+      securityRisks: [],
+      qualityScore: 88,
+    });
+    runtime.cryptoDetector.detect = async (): Promise<DetectCryptoResult> => ({
+      algorithms: [{
+        name: 'SHA256',
+        type: 'hash',
+        confidence: 0.9,
+        location: {file: 'top-sign.js', line: 1},
+        usage: 'signature',
+      }],
+      libraries: [],
+      confidence: 0.9,
+    });
     runtime.hookManager.create = ({type}: {type: string}) => ({
       hookId: `${type}-hook-1`,
       type,
       script: `/* ${type} */`,
     });
     runtime.hookManager.getRecords = () => ([{
+      hookId: 'fetch-hook-1',
       target: 'fetch',
       event: 'request',
       method: 'POST',
@@ -84,7 +119,7 @@ describe('reverse task tools', () => {
             note: 'captured sign parameters',
           },
         },
-      } as any, recordResponse as any, {} as any);
+      } as Parameters<typeof recordReverseEvidence.handler>[0], recordResponse as unknown as Parameters<typeof recordReverseEvidence.handler>[1], {} as Parameters<typeof recordReverseEvidence.handler>[2]);
 
       const recorded = (
         await readFile(path.join(rootDir, 'task-001', 'runtime-evidence.jsonl'), 'utf8')
@@ -103,7 +138,7 @@ describe('reverse task tools', () => {
           hookPreset: 'api-signature',
           autoInjectHooks: false,
         },
-      } as any, analyzeResponse as any, {} as any);
+      } as Parameters<typeof analyzeTarget.handler>[0], analyzeResponse as unknown as Parameters<typeof analyzeTarget.handler>[1], {} as Parameters<typeof analyzeTarget.handler>[2]);
       const analyzeJson = extractFirstJsonBlock(analyzeResponse.lines);
       assert.ok(Array.isArray(analyzeJson.recommendedNextSteps));
       assert.ok(Array.isArray(analyzeJson.stopIf));
@@ -116,7 +151,7 @@ describe('reverse task tools', () => {
           view: 'summary',
           maxRecords: 5,
         },
-      } as any, hookResponse as any, {} as any);
+      } as Parameters<typeof getHookData.handler>[0], hookResponse as unknown as Parameters<typeof getHookData.handler>[1], {} as Parameters<typeof getHookData.handler>[2]);
       const hookJson = extractFirstJsonBlock(hookResponse.lines);
       assert.ok(Array.isArray(hookJson.candidateEnvNeeds));
       assert.ok(Array.isArray(hookJson.requestBindings));

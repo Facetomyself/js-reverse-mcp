@@ -35,7 +35,7 @@
   - [`get_console_message`](#get_console_message)
   - [`list_console_messages`](#list_console_messages)
   - [`take_screenshot`](#take_screenshot)
-- **[JS Reverse Engineering](#js-reverse-engineering)** (44 tools)
+- **[JS Reverse Engineering](#js-reverse-engineering)** (45 tools)
   - [`analyze_target`](#analyze_target)
   - [`break_on_xhr`](#break_on_xhr)
   - [`collect_code`](#collect_code)
@@ -62,6 +62,7 @@
   - [`list_stealth_presets`](#list_stealth_presets)
   - [`monitor_events`](#monitor_events)
   - [`pause`](#pause)
+  - [`record_reverse_evidence`](#record_reverse_evidence)
   - [`remove_breakpoint`](#remove_breakpoint)
   - [`remove_hook`](#remove_hook)
   - [`remove_xhr_breakpoint`](#remove_xhr_breakpoint)
@@ -112,6 +113,7 @@
 - `sessionId`
 - `path`
 - `pretty`
+- `encrypt`
 
 ### `find_clickable_elements`
 
@@ -394,7 +396,7 @@ so returned values have to JSON-serializable.
 
 ### `create_hook`
 
-**Description:** Create hook script for function/fetch/xhr/property/cookie/websocket/eval/timer.
+**Description:** RECOMMENDED: Create hook script for function/fetch/xhr/property/cookie/websocket/eval/timer. Hooks run without pausing page execution and are the preferred approach over breakpoints for monitoring and interception.
 
 **Parameters:**
 
@@ -502,7 +504,7 @@ so returned values have to JSON-serializable.
 
 ### `hook_function`
 
-**Description:** Hooks a JavaScript function to log its calls, arguments, and return values. Useful for understanding how functions are used without setting breakpoints.
+**Description:** RECOMMENDED for reverse engineering: Hooks a JavaScript function to log its calls, arguments, and return values without pausing execution. More reliable than breakpoints for automated workflows. Use this as the default approach for monitoring functions.
 
 **Parameters:**
 
@@ -577,6 +579,19 @@ so returned values have to JSON-serializable.
 
 **Description:** Pauses JavaScript execution at the current point. Use this to interrupt running code.
 
+### `record_reverse_evidence`
+
+**Description:** Append structured reverse-engineering evidence to a task artifact log.
+
+**Parameters:**
+
+- `taskId`
+- `taskSlug`
+- `targetUrl`
+- `goal`
+- `channel`
+- `entry`
+
 ### `remove_breakpoint`
 
 **Description:** Removes a breakpoint by its ID. Use list_breakpoints to see active breakpoints.
@@ -643,7 +658,7 @@ so returned values have to JSON-serializable.
 
 ### `set_breakpoint`
 
-**Description:** Sets a breakpoint in a JavaScript file at the specified line. The breakpoint will trigger when the code executes.
+**Description:** Sets a breakpoint in a JavaScript file at the specified line. The breakpoint will trigger when the code executes. NOTE: Prefer hook_function or create_hook for monitoring function calls — breakpoints require pause/resume coordination and are error-prone in automated workflows. Use breakpoints only when you need to inspect local variables inside a function.
 
 **Parameters:**
 
@@ -655,7 +670,7 @@ so returned values have to JSON-serializable.
 
 ### `set_breakpoint_on_text`
 
-**Description:** Sets a breakpoint on specific code (function name, statement, etc.) by searching for it and automatically determining the exact position. Works with both normal and minified files.
+**Description:** Sets a breakpoint on specific code (function name, statement, etc.) by searching for it and automatically determining the exact position. Works with both normal and minified files. NOTE: Prefer hook_function for monitoring function calls — it captures args/results without pausing execution. Use this only when you need to inspect local variables at a specific code location.
 
 **Parameters:**
 

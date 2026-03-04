@@ -1,8 +1,16 @@
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import {zod} from '../third_party/index.js';
-import {defineTool} from './ToolDefinition.js';
+import {TokenBudgetManager} from '../utils/TokenBudgetManager.js';
+
 import {ToolCategory} from './categories.js';
 import {getJSHookRuntime} from './runtime.js';
-import {TokenBudgetManager} from '../utils/TokenBudgetManager.js';
+import {defineTool} from './ToolDefinition.js';
+
 
 export const deobfuscateCode = defineTool({
   name: 'deobfuscate_code',
@@ -617,7 +625,7 @@ async function runAnalyzeTargetWorkflow(runtime: ReturnType<typeof getJSHookRunt
   const injectedHooks = await installAnalyzeHooks(runtime, hookPreset, autoInjectHooks);
 
   const replayResults = params.autoReplayActions?.length
-    ? await runtime.pageController.replayActions(params.autoReplayActions as any)
+    ? await runtime.pageController.replayActions(params.autoReplayActions)
     : [];
 
   if (params.waitAfterHookMs && params.waitAfterHookMs > 0) {
@@ -626,7 +634,7 @@ async function runAnalyzeTargetWorkflow(runtime: ReturnType<typeof getJSHookRunt
 
   const [understand, crypto] = await Promise.all([
     runtime.analyzer.understand({code: analysisCode, focus: 'security'}),
-    runtime.cryptoDetector.detect({code: analysisCode, useAI: params.useAI} as any),
+    runtime.cryptoDetector.detect({code: analysisCode}),
   ]);
 
   const deobfuscation = params.runDeobfuscation
@@ -670,7 +678,7 @@ async function runAnalyzeTargetWorkflow(runtime: ReturnType<typeof getJSHookRunt
   });
   const collectionDependencies =
     collectResult && typeof collectResult === 'object'
-      ? (collectResult as any).dependencies
+      ? (collectResult as {dependencies?: unknown}).dependencies
       : undefined;
 
   return {
@@ -801,7 +809,7 @@ export const analyzeTarget = defineTool({
   },
   handler: async (request, response) => {
     const runtime = getJSHookRuntime();
-    const result = await runAnalyzeTargetWorkflow(runtime, request.params as AnalyzeTargetParams);
+    const result = await runAnalyzeTargetWorkflow(runtime, request.params);
 
     response.appendResponseLine('```json');
     response.appendResponseLine(JSON.stringify(result, null, 2));
@@ -871,15 +879,19 @@ export const riskPanel = defineTool({
 
     const [understand, crypto] = await Promise.all([
       runtime.analyzer.understand({code, focus: 'security'}),
-      runtime.cryptoDetector.detect({code, useAI: request.params.useAI} as any),
+      runtime.cryptoDetector.detect({code}),
     ]);
 
     const securityRisks = Array.isArray(understand.securityRisks) ? understand.securityRisks : [];
     const highSeverityCount = securityRisks.filter((risk) => risk.severity === 'critical' || risk.severity === 'high').length;
-    const cryptoIssues = Array.isArray((crypto as any).securityIssues) ? (crypto as any).securityIssues : [];
-    const algorithms = Array.isArray((crypto as any).algorithms) ? (crypto as any).algorithms : [];
-    const dangerousAlgorithms = algorithms.filter((algo: any) =>
-      ['md5', 'sha1', 'rc4', 'des'].includes(String(algo.name).toLowerCase()),
+    const cryptoResult = crypto as {
+      securityIssues?: unknown[];
+      algorithms?: Array<{name?: string}>;
+    };
+    const cryptoIssues = Array.isArray(cryptoResult.securityIssues) ? cryptoResult.securityIssues : [];
+    const algorithms = Array.isArray(cryptoResult.algorithms) ? cryptoResult.algorithms : [];
+    const dangerousAlgorithms = algorithms.filter((algo) =>
+      ['md5', 'sha1', 'rc4', 'des'].includes(String(algo.name ?? '').toLowerCase()),
     );
 
     let hookSignalCount = 0;
@@ -909,7 +921,7 @@ export const riskPanel = defineTool({
         highSeverityRisks: highSeverityCount,
         cryptoAlgorithms: algorithms.length,
         cryptoIssues: cryptoIssues.length,
-        dangerousAlgorithms: dangerousAlgorithms.map((algo: any) => algo.name),
+        dangerousAlgorithms: dangerousAlgorithms.map((algo) => algo.name ?? 'unknown'),
         hookSignals: hookSignalCount,
       },
       recommendations: [

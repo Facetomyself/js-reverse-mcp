@@ -1,10 +1,17 @@
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import {mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 
 import {zod} from '../third_party/index.js';
-import {defineTool} from './ToolDefinition.js';
+
 import {ToolCategory} from './categories.js';
 import {getJSHookRuntime} from './runtime.js';
+import {defineTool} from './ToolDefinition.js';
 
 async function writeArtifactFile(taskDir: string, relativePath: string, content: string): Promise<void> {
   const filePath = path.join(taskDir, relativePath);

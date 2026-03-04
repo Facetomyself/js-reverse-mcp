@@ -1,3 +1,9 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import assert from 'node:assert';
 import {mkdtemp, readFile, rm, stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -8,7 +14,12 @@ import {ReverseTaskStore} from '../../../src/reverse/ReverseTaskStore.js';
 import {diffEnvRequirements, exportRebuildBundle} from '../../../src/tools/rebuild.js';
 import {getJSHookRuntime} from '../../../src/tools/runtime.js';
 
-function makeResponse() {
+interface ResponseShape {
+  lines: string[];
+  appendResponseLine(value: string): void;
+}
+
+function makeResponse(): ResponseShape {
   const lines: string[] = [];
   return {
     lines,
@@ -27,7 +38,7 @@ function extractFirstJsonBlock(lines: string[]): Record<string, unknown> {
 describe('rebuild bridge tools', () => {
   it('exports a local rebuild bundle and prioritizes env patches from runtime errors', async () => {
     const rootDir = await mkdtemp(path.join(tmpdir(), 'js-reverse-rebuild-'));
-    const runtime = getJSHookRuntime() as any;
+    const runtime = getJSHookRuntime();
     const originalStore = runtime.reverseTaskStore;
     runtime.reverseTaskStore = new ReverseTaskStore({rootDir});
 
@@ -51,7 +62,7 @@ describe('rebuild bridge tools', () => {
             'cookie sid participates in request chain',
           ],
         },
-      } as any, exportResponse as any, {} as any);
+      } as Parameters<typeof exportRebuildBundle.handler>[0], exportResponse as unknown as Parameters<typeof exportRebuildBundle.handler>[1], {} as Parameters<typeof exportRebuildBundle.handler>[2]);
 
       await stat(path.join(rootDir, 'task-001', 'env', 'entry.js'));
       await stat(path.join(rootDir, 'task-001', 'env', 'env.js'));
@@ -66,10 +77,10 @@ describe('rebuild bridge tools', () => {
       const diffResponse = makeResponse();
       await diffEnvRequirements.handler({
         params: {
-          runtimeError: 'ReferenceError: window is not defined\nReferenceError: localStorage is not defined\nTypeError: Cannot read properties of undefined (reading \'subtle\')',
+          runtimeError: "ReferenceError: window is not defined\nReferenceError: localStorage is not defined\nTypeError: Cannot read properties of undefined (reading 'subtle')",
           observedCapabilities: ['window', 'document', 'navigator', 'localStorage', 'crypto'],
         },
-      } as any, diffResponse as any, {} as any);
+      } as Parameters<typeof diffEnvRequirements.handler>[0], diffResponse as unknown as Parameters<typeof diffEnvRequirements.handler>[1], {} as Parameters<typeof diffEnvRequirements.handler>[2]);
 
       const diffJson = extractFirstJsonBlock(diffResponse.lines);
       assert.ok(Array.isArray(diffJson.missingCapabilities));

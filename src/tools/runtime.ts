@@ -1,23 +1,29 @@
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import {AISummarizer} from '../modules/analyzer/AISummarizer.js';
+import {CodeAnalyzer} from '../modules/analyzer/CodeAnalyzer.js';
 import {BrowserModeManager} from '../modules/browser/BrowserModeManager.js';
 import {CodeCollector} from '../modules/collector/CodeCollector.js';
 import {DOMInspector} from '../modules/collector/DOMInspector.js';
 import {PageController} from '../modules/collector/PageController.js';
-import {HookManager} from '../modules/hook/HookManager.js';
-import {CodeAnalyzer} from '../modules/analyzer/CodeAnalyzer.js';
-import {AISummarizer} from '../modules/analyzer/AISummarizer.js';
-import {Deobfuscator} from '../modules/deobfuscator/Deobfuscator.js';
 import {CryptoDetector} from '../modules/crypto/CryptoDetector.js';
+import {Deobfuscator} from '../modules/deobfuscator/Deobfuscator.js';
+import {HookManager} from '../modules/hook/HookManager.js';
 import {ReverseTaskStore} from '../reverse/ReverseTaskStore.js';
 import {LLMService} from '../services/LLMService.js';
-import {DetailedDataManager} from '../utils/detailedDataManager.js';
-import {UnifiedCacheManager} from '../utils/UnifiedCacheManager.js';
+import type {PuppeteerConfig} from '../types/index.js';
 import {
   CodeCacheAdapter,
   CodeCompressorAdapter,
   DetailedDataManagerAdapter,
 } from '../utils/CacheAdapters.js';
 import {getBrowserConfig} from '../utils/config.js';
-import type {PuppeteerConfig} from '../types/index.js';
+import {DetailedDataManager} from '../utils/detailedDataManager.js';
+import {UnifiedCacheManager} from '../utils/UnifiedCacheManager.js';
 
 let runtime: JSHookRuntime | undefined;
 
