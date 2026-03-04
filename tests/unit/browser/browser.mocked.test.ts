@@ -1,8 +1,57 @@
-import { afterEach, beforeEach, describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
-import { BrowserManager, launch } from '../../../src/browser.js';
-import { puppeteer } from '../../../src/third_party/index.js';
-import { StealthScripts2025 } from '../../../src/modules/stealth/StealthScripts2025.js';
+import {createWriteStream} from 'node:fs';
+import {afterEach, beforeEach, describe, it} from 'node:test';
+
+import {BrowserManager, launch} from '../../../src/browser.js';
+import {StealthScripts2025, type StealthReport} from '../../../src/modules/stealth/StealthScripts2025.js';
+import {puppeteer} from '../../../src/third_party/index.js';
+
+interface ResettableStealthScripts {
+  injectAll: typeof StealthScripts2025.injectAll;
+}
+
+interface ProcessLike {
+  stderr: {pipe(destination: unknown): void};
+  stdout: {pipe(destination: unknown): void};
+}
+
+interface PageLike {
+  resize(): Promise<void>;
+}
+
+interface BrowserLike {
+  connected: boolean;
+  process?(): ProcessLike;
+  pages(): Promise<unknown[]>;
+  on(event: string, handler: unknown): void;
+  close(): Promise<void>;
+}
+
+interface BrowserManagerLike {
+  browser?: BrowserLike;
+  connectToRemoteBrowser(): Promise<BrowserLike>;
+  launchBrowser(): Promise<BrowserLike>;
+}
+
+type TargetCreatedHandler = (target: {
+  type(): string;
+  page(): Promise<{id: string}>;
+}) => Promise<void>;
+
+function makeStealthReport(preset: string): StealthReport {
+  return {
+    preset,
+    injectedFeatures: ['mockChrome'],
+    skippedFeatures: [],
+    userAgent: 'mock-agent',
+    platform: 'mock-platform',
+  };
+}
 
 describe('browser.ts mocked', () => {
   let originalLaunch: typeof puppeteer.launch;
@@ -19,10 +68,10 @@ describe('browser.ts mocked', () => {
   afterEach(async () => {
     puppeteer.launch = originalLaunch;
     puppeteer.connect = originalConnect;
-    (StealthScripts2025 as any).injectAll = originalInjectAll;
+    (StealthScripts2025 as unknown as ResettableStealthScripts).injectAll = originalInjectAll;
     try {
-      const m = BrowserManager.getInstance({ headless: true, isolated: true });
-      await m.close();
+      const manager = BrowserManager.getInstance({headless: true, isolated: true});
+      await manager.close();
     } catch {
       // no-op
     }
@@ -32,23 +81,24 @@ describe('browser.ts mocked', () => {
   it('launch() passes options, resizes viewport and handles already running error', async () => {
     let launchArgs: Record<string, unknown> | null = null;
     let resized = 0;
-    const fakeBrowser = {
+    const fakeBrowser: BrowserLike = {
+      connected: true,
       process: () => ({
-        stderr: { pipe: () => {} },
-        stdout: { pipe: () => {} },
+        stderr: {pipe: () => undefined},
+        stdout: {pipe: () => undefined},
       }),
-      pages: async () => [
-        {
-          resize: async () => {
-            resized += 1;
-          },
+      pages: async () => [{
+        resize: async () => {
+          resized += 1;
         },
-      ],
+      } satisfies PageLike],
+      on: () => undefined,
+      close: async () => undefined,
     };
 
-    puppeteer.launch = async (opts: any) => {
-      launchArgs = opts;
-      return fakeBrowser as any;
+    puppeteer.launch = async (opts) => {
+      launchArgs = (opts ?? {}) as Record<string, unknown>;
+      return fakeBrowser as unknown as Awaited<ReturnType<typeof puppeteer.launch>>;
     };
 
     const out = await launch({
@@ -56,13 +106,13 @@ describe('browser.ts mocked', () => {
       isolated: true,
       devtools: true,
       args: ['--x-test'],
-      viewport: { width: 800, height: 600 },
-      logFile: { write: () => {} } as any,
-    } as any);
+      viewport: {width: 800, height: 600},
+      logFile: createWriteStream('/tmp/js-reverse-mcp-browser-mocked.log'),
+    });
 
-    assert.strictEqual(out, fakeBrowser as any);
+    assert.strictEqual(out, fakeBrowser as unknown as Awaited<ReturnType<typeof puppeteer.launch>>);
     assert.ok(launchArgs);
-    assert.strictEqual(Array.isArray((launchArgs as any)?.args), true);
+    assert.strictEqual(Array.isArray((launchArgs ?? {})['args']), true);
     assert.strictEqual(resized, 1);
 
     puppeteer.launch = async () => {
@@ -75,7 +125,7 @@ describe('browser.ts mocked', () => {
           isolated: false,
           devtools: false,
           userDataDir: '/tmp/browser-profile',
-        } as any);
+        });
       },
       /Use --isolated/,
     );
@@ -84,28 +134,28 @@ describe('browser.ts mocked', () => {
   it('connectToRemoteBrowser handles success and failure', async () => {
     const manager = BrowserManager.getInstance({
       remoteDebuggingUrl: 'http://127.0.0.1:9222',
-      wsHeaders: { Authorization: 'x' },
+      wsHeaders: {Authorization: 'x'},
       isolated: true,
       headless: true,
     });
 
-    const browser = {
+    const browser: BrowserLike = {
       connected: true,
-      on: () => {},
+      on: () => undefined,
       pages: async () => [],
-      close: async () => {},
+      close: async () => undefined,
     };
-    puppeteer.connect = async () => browser as any;
+    puppeteer.connect = async () => browser as unknown as Awaited<ReturnType<typeof puppeteer.connect>>;
 
-    const connected = await (manager as any).connectToRemoteBrowser();
-    assert.strictEqual(connected, browser as any);
+    const connected = await (manager as unknown as BrowserManagerLike).connectToRemoteBrowser();
+    assert.strictEqual(connected, browser);
 
     puppeteer.connect = async () => {
       throw new Error('refused');
     };
     await assert.rejects(
       async () => {
-        await (manager as any).connectToRemoteBrowser();
+        await (manager as unknown as BrowserManagerLike).connectToRemoteBrowser();
       },
       /Failed to connect to remote browser: refused/,
     );
@@ -119,15 +169,15 @@ describe('browser.ts mocked', () => {
       args: ['--a'],
     });
 
-    const browser = {
+    const browser: BrowserLike = {
       connected: true,
-      on: () => {},
+      on: () => undefined,
       pages: async () => [],
-      close: async () => {},
+      close: async () => undefined,
     };
-    puppeteer.launch = async () => browser as any;
-    const launched = await (manager as any).launchBrowser();
-    assert.strictEqual(launched, browser as any);
+    puppeteer.launch = async () => browser as unknown as Awaited<ReturnType<typeof puppeteer.launch>>;
+    const launched = await (manager as unknown as BrowserManagerLike).launchBrowser();
+    assert.strictEqual(launched, browser);
     assert.strictEqual(manager.isConnected(), true);
 
     puppeteer.launch = async () => {
@@ -135,7 +185,7 @@ describe('browser.ts mocked', () => {
     };
     await assert.rejects(
       async () => {
-        await (manager as any).launchBrowser();
+        await (manager as unknown as BrowserManagerLike).launchBrowser();
       },
       /Failed to launch browser: failed to spawn/,
     );
@@ -146,22 +196,23 @@ describe('browser.ts mocked', () => {
       headless: true,
       isolated: true,
     });
-    let createdHandler: any = null;
-    const browser = {
+    let createdHandler: TargetCreatedHandler | null = null;
+    const browser: BrowserLike = {
       connected: true,
-      pages: async () => [{ id: 'a' }],
+      pages: async () => [{id: 'a'}],
       on: (event: string, handler: unknown) => {
         if (event === 'targetcreated') {
-          createdHandler = handler;
+          createdHandler = handler as TargetCreatedHandler;
         }
       },
-      close: async () => {},
+      close: async () => undefined,
     };
-    (manager as any).browser = browser;
+    (manager as unknown as BrowserManagerLike).browser = browser;
 
     let injectCount = 0;
-    (StealthScripts2025 as any).injectAll = async () => {
+    (StealthScripts2025 as unknown as ResettableStealthScripts).injectAll = async () => {
       injectCount += 1;
+      return makeStealthReport('windows-chrome');
     };
 
     await manager.injectStealth('windows-chrome');
@@ -170,9 +221,13 @@ describe('browser.ts mocked', () => {
     await manager.injectStealth();
     assert.strictEqual(injectCount, 1);
 
-    await createdHandler({
+    if (!createdHandler) {
+      throw new Error('expected targetcreated handler');
+    }
+    const targetCreatedHandler: TargetCreatedHandler = createdHandler;
+    await targetCreatedHandler({
       type: () => 'page',
-      page: async () => ({ id: 'new-page' }),
+      page: async () => ({id: 'new-page'}),
     });
     assert.strictEqual(injectCount, 2);
   });
