@@ -1,5 +1,11 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import {
   AAEncodeDeobfuscator,
   PackerDeobfuscator,
@@ -24,18 +30,40 @@ describe('PackerDeobfuscator family', () => {
     assert.strictEqual(plain.iterations, 0);
     assert.strictEqual(plain.code, 'const x = 1;');
 
-    (p as any).unpack = () => 'eval(function(p,a,c,k,e,d){return p;}(...))';
+    (
+      p as unknown as { unpack(code: string): string }
+    ).unpack = () => 'eval(function(p,a,c,k,e,d){return p;}(...))';
     const warned = await p.deobfuscate({
       code: 'eval(function(p,a,c,k,e,d){return p;}(...))',
       maxIterations: 2,
     });
     assert.strictEqual(warned.success, true);
     assert.strictEqual(warned.iterations, 0);
-    assert.ok(warned.warnings.some((w: string) => w.includes('解包失败')));
+    assert.ok(warned.warnings.some((w) => w.includes('解包失败')));
   });
 
   it('covers unpack/parse/execute/base/beautify private flows', () => {
-    const p = new PackerDeobfuscator() as any;
+    const p = new PackerDeobfuscator() as unknown as {
+      unpack(code: string): string;
+      parsePackerParams(code: string): {
+        p: string;
+        a: number;
+        c: number;
+        k: string[];
+        e: () => unknown;
+        d: () => string;
+      } | null;
+      executeUnpacker(params: {
+        p: string;
+        a: number;
+        c: number;
+        k: string[];
+        e: () => unknown;
+        d: () => string;
+      }): string;
+      base(value: number, radix: number): string;
+      beautify(code: string): string;
+    };
 
     const code = "eval(function(p,a,c,k,e,d){return p;}('0 1',62,2,'hello|world',0,{}))";
     const unpacked = p.unpack(code);
@@ -71,7 +99,13 @@ describe('PackerDeobfuscator family', () => {
   });
 
   it('handles packer deobfuscate exception branch', async () => {
-    const p = new PackerDeobfuscator() as any;
+    const p = new PackerDeobfuscator() as unknown as {
+      unpack(code: string): string;
+      deobfuscate(options: { code: string; maxIterations: number }): Promise<{
+        success: boolean;
+        warnings: string[];
+      }>;
+    };
     p.unpack = () => {
       throw new Error('boom');
     };
