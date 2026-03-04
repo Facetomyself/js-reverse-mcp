@@ -1,5 +1,12 @@
-import {describe, it} from 'node:test';
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import {describe, it} from 'node:test';
+
 import {parseArguments} from '../../../src/cli.js';
 import * as consoleTools from '../../../src/tools/console.js';
 import * as debuggerTools from '../../../src/tools/debugger.js';
@@ -7,6 +14,10 @@ import * as networkTools from '../../../src/tools/network.js';
 import * as pagesTools from '../../../src/tools/pages.js';
 import * as screenshotTools from '../../../src/tools/screenshot.js';
 import * as scriptTools from '../../../src/tools/script.js';
+
+interface NamedToolExport {
+  name?: string;
+}
 
 describe('Backward compatibility', () => {
   it('preserves original tool exports', () => {
@@ -17,10 +28,10 @@ describe('Backward compatibility', () => {
       ...Object.values(pagesTools),
       ...Object.values(screenshotTools),
       ...Object.values(scriptTools),
-    ] as any[];
+    ] as NamedToolExport[];
 
     assert.ok(tools.length > 0);
-    assert.ok(tools.some(t => t.name === 'evaluate_script'));
+    assert.ok(tools.some((tool) => tool.name === 'evaluate_script'));
   });
 
   it('keeps CLI argument compatibility', () => {
@@ -36,7 +47,7 @@ describe('Backward compatibility', () => {
 
     const {HookManager} = await import('../../../src/modules/hook/HookManager.js');
     const manager = new HookManager();
-    const hook = manager.create({type: 'fetch'} as any);
+    const hook = manager.create({type: 'fetch'});
     assert.ok(hook.hookId);
   });
 });

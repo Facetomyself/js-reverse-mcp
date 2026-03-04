@@ -1,8 +1,31 @@
-import { describe, it } from 'node:test';
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
+import { describe, it } from 'node:test';
+
 import { logger, saveLogsToFile } from '../../../src/logger.js';
+
+interface FakeWriteStream {
+  write(chunk: string): boolean;
+  on(event: string, cb: (err: Error) => void): FakeWriteStream;
+  end(): void;
+}
+
+interface MutableFsModule {
+  createWriteStream: typeof fs.createWriteStream;
+}
+
+interface MutableProcess {
+  exit(code: number): never;
+}
+
+type ConsoleErrorFn = typeof console.error;
 
 describe('root logger', () => {
   it('saves debug logs to a file', async () => {
@@ -29,29 +52,29 @@ describe('root logger', () => {
 
     let errorHandler: ((err: Error) => void) | null = null;
     let endCalled = 0;
-    const fakeStream = {
+    const fakeStream: FakeWriteStream = {
       write: () => true,
       on: (event: string, cb: (err: Error) => void) => {
         if (event === 'error') {
           errorHandler = cb;
         }
-        return fakeStream as any;
+        return fakeStream;
       },
       end: () => {
         endCalled += 1;
       },
-    } as any;
+    };
 
-    (fs as any).createWriteStream = () => fakeStream;
+    (fs as unknown as MutableFsModule).createWriteStream = () => fakeStream as unknown as ReturnType<typeof fs.createWriteStream>;
     let exitCode: number | null = null;
-    (process as any).exit = (code: number) => {
+    (process as unknown as MutableProcess).exit = (code: number) => {
       exitCode = code;
       throw new Error('__exit_called__');
     };
     let errorLogged = '';
-    console.error = (msg?: any) => {
+    console.error = ((msg?: unknown) => {
       errorLogged = String(msg ?? '');
-    };
+    }) as ConsoleErrorFn;
 
     try {
       saveLogsToFile('/tmp/fake-log.txt');
@@ -61,8 +84,8 @@ describe('root logger', () => {
       assert.strictEqual(exitCode, 1);
       assert.ok(errorLogged.includes('Error when opening/writing to log file'));
     } finally {
-      (fs as any).createWriteStream = originalCreate;
-      (process as any).exit = originalExit;
+      (fs as unknown as MutableFsModule).createWriteStream = originalCreate;
+      (process as unknown as MutableProcess).exit = originalExit as unknown as MutableProcess['exit'];
       console.error = originalConsoleError;
     }
   });
