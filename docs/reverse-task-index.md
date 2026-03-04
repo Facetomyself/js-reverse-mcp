@@ -103,14 +103,15 @@
 
 1. `new_page`
 2. `analyze_target`
-3. `search_in_scripts`
-4. `create_hook` + `inject_hook`
-5. 触发页面动作
-6. `get_hook_data`
-7. `record_reverse_evidence`
-8. `export_rebuild_bundle`
-9. `diff_env_requirements`
-10. `risk_panel`
+3. 设定目标边界：`targetKeywords`、`targetUrlPatterns`、`targetFunctionNames`、`targetActionDescription`
+4. `search_in_scripts`
+5. `create_hook` + `inject_hook`
+6. 触发页面动作
+7. `get_hook_data`
+8. `record_reverse_evidence`
+9. `export_rebuild_bundle`
+10. `diff_env_requirements`
+11. `risk_panel`
 
 ## 11) 参数总表
 

@@ -92,7 +92,48 @@ function buildAutoEntryCode(targetScript: CodeFile | undefined, capture: Record<
   ].join('\n');
 }
 
-async function buildAutoBundle(taskId: string, runtime: ReturnType<typeof getJSHookRuntime>): Promise<{
+function matchesTargetText(
+  value: unknown,
+  targetKeywords: string[],
+  targetUrlPatterns: string[],
+): boolean {
+  const text = typeof value === 'string' ? value.toLowerCase() : JSON.stringify(value ?? '').toLowerCase();
+  return targetKeywords.some((keyword) => text.includes(keyword.toLowerCase())) ||
+    targetUrlPatterns.some((pattern) => text.includes(pattern.toLowerCase()));
+}
+
+function filterRuntimeEvidence(
+  records: Record<string, unknown>[],
+  targetKeywords: string[],
+  targetUrlPatterns: string[],
+  maxEvidenceItems: number,
+): Record<string, unknown>[] {
+  const filtered = (targetKeywords.length === 0 && targetUrlPatterns.length === 0)
+    ? records
+    : records.filter((record) => matchesTargetText(record, targetKeywords, targetUrlPatterns));
+  return filtered.slice(0, maxEvidenceItems);
+}
+
+function pickTargetScript(
+  files: CodeFile[],
+  targetKeywords: string[],
+  targetUrlPatterns: string[],
+): CodeFile | undefined {
+  if (targetKeywords.length === 0 && targetUrlPatterns.length === 0) {
+    return files[0];
+  }
+  return files.find((file) => matchesTargetText(file, targetKeywords, targetUrlPatterns)) ?? files[0];
+}
+
+async function buildAutoBundle(
+  taskId: string,
+  runtime: ReturnType<typeof getJSHookRuntime>,
+  options: {
+    targetKeywords: string[];
+    targetUrlPatterns: string[];
+    maxEvidenceItems: number;
+  },
+): Promise<{
   entryCode: string;
   envCode: string;
   polyfillsCode: string;
@@ -100,7 +141,7 @@ async function buildAutoBundle(taskId: string, runtime: ReturnType<typeof getJSH
   notes: string[];
 }> {
   const topPriority = runtime.collector.getTopPriorityFiles(1);
-  const targetScript = topPriority.files[0];
+  const targetScript = pickTargetScript(topPriority.files, options.targetKeywords, options.targetUrlPatterns);
   const page = await runtime.pageController.getPage();
   const [cookies, localStorage, sessionStorage, runtimeEvidence] = await Promise.all([
     runtime.pageController.getCookies(),
@@ -108,6 +149,12 @@ async function buildAutoBundle(taskId: string, runtime: ReturnType<typeof getJSH
     runtime.pageController.getSessionStorage(),
     runtime.reverseTaskStore.readLog('runtime-evidence', taskId),
   ]);
+  const filteredRuntimeEvidence = filterRuntimeEvidence(
+    runtimeEvidence,
+    options.targetKeywords,
+    options.targetUrlPatterns,
+    options.maxEvidenceItems,
+  );
 
   const capture = {
     page: {
@@ -117,7 +164,7 @@ async function buildAutoBundle(taskId: string, runtime: ReturnType<typeof getJSH
     cookies,
     localStorage,
     sessionStorage,
-    runtimeEvidence,
+    runtimeEvidence: filteredRuntimeEvidence,
     targetScript: targetScript ?? null,
   };
 
@@ -128,7 +175,7 @@ async function buildAutoBundle(taskId: string, runtime: ReturnType<typeof getJSH
     capture,
     notes: [
       targetScript ? `auto-selected target script: ${targetScript.url}` : 'no target script selected from collector',
-      runtimeEvidence.length > 0 ? `runtime evidence records: ${runtimeEvidence.length}` : 'no runtime evidence records found',
+      filteredRuntimeEvidence.length > 0 ? `filtered runtime evidence records: ${filteredRuntimeEvidence.length}` : 'no runtime evidence records found after target filtering',
     ],
   };
 }
@@ -191,6 +238,9 @@ export const exportRebuildBundle = defineTool({
     targetUrl: zod.string(),
     goal: zod.string(),
     autoGenerate: zod.boolean().optional(),
+    targetKeywords: zod.array(zod.string()).optional(),
+    targetUrlPatterns: zod.array(zod.string()).optional(),
+    maxEvidenceItems: zod.number().int().positive().optional(),
     entryCode: zod.string().optional(),
     envCode: zod.string().optional(),
     polyfillsCode: zod.string().optional(),
@@ -207,7 +257,11 @@ export const exportRebuildBundle = defineTool({
     });
 
     const bundle = request.params.autoGenerate
-      ? await buildAutoBundle(request.params.taskId, runtime)
+      ? await buildAutoBundle(request.params.taskId, runtime, {
+          targetKeywords: request.params.targetKeywords ?? [],
+          targetUrlPatterns: request.params.targetUrlPatterns ?? [],
+          maxEvidenceItems: request.params.maxEvidenceItems ?? 20,
+        })
       : {
           entryCode: request.params.entryCode ?? '',
           envCode: request.params.envCode ?? '',

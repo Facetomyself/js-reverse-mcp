@@ -172,4 +172,97 @@ describe('rebuild bridge tools', () => {
       await rm(rootDir, {recursive: true, force: true});
     }
   });
+
+  it('filters auto-generated evidence by target keywords instead of logging unrelated page noise', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'js-reverse-rebuild-filtered-'));
+    const runtime = getJSHookRuntime();
+    const originalStore = runtime.reverseTaskStore;
+    const originals = {
+      getTopPriorityFiles: runtime.collector.getTopPriorityFiles,
+      getCookies: runtime.pageController.getCookies,
+      getLocalStorage: runtime.pageController.getLocalStorage,
+      getSessionStorage: runtime.pageController.getSessionStorage,
+      getPage: runtime.pageController.getPage,
+    };
+    runtime.reverseTaskStore = new ReverseTaskStore({rootDir});
+
+    try {
+      const task = await runtime.reverseTaskStore.openTask({
+        taskId: 'task-003',
+        slug: 'jd-h5st',
+        targetUrl: 'https://item.jd.com/1001.html',
+        goal: 'find h5st',
+      });
+      await task.appendLog('runtime-evidence', {
+        source: 'hook',
+        requestUrl: 'https://api.m.jd.com/client.action?functionId=pc_search&h5st=abc123',
+        functionName: 'genH5st',
+        bodyPreview: '{"h5st":"abc123"}',
+      });
+      await task.appendLog('runtime-evidence', {
+        source: 'hook',
+        requestUrl: 'https://example.com/analytics',
+        functionName: 'trackAd',
+        bodyPreview: '{"event":"ad"}',
+      });
+
+      runtime.collector.getTopPriorityFiles = () => ({
+        files: [
+          {
+            url: 'https://storage.360buyimg.com/js/h5st.js',
+            content: 'function genH5st() { return "abc123"; }',
+            size: 40,
+            type: 'external',
+          },
+          {
+            url: 'https://storage.360buyimg.com/js/analytics.js',
+            content: 'function trackAd() { return "ad"; }',
+            size: 34,
+            type: 'external',
+          },
+        ],
+        totalSize: 74,
+        totalFiles: 2,
+      });
+      runtime.pageController.getCookies = async () => [{name: 'pin', value: 'jd-user'}];
+      runtime.pageController.getLocalStorage = async () => ({h5st_seed: 'seed-1', ad_cache: 'skip'});
+      runtime.pageController.getSessionStorage = async () => ({h5st_nonce: 'n-1'});
+      runtime.pageController.getPage = async () => ({
+        url: () => 'https://item.jd.com/1001.html',
+        title: async () => 'JD Product',
+      } as Awaited<ReturnType<typeof runtime.pageController.getPage>>);
+
+      const response = makeResponse();
+      await exportRebuildBundle.handler({
+        params: {
+          taskId: 'task-003',
+          taskSlug: 'jd-h5st',
+          targetUrl: 'https://item.jd.com/1001.html',
+          goal: 'find h5st',
+          autoGenerate: true,
+          targetKeywords: ['h5st'],
+          targetUrlPatterns: ['api.m.jd.com'],
+          maxEvidenceItems: 2,
+        },
+      } as unknown as Parameters<typeof exportRebuildBundle.handler>[0], response as unknown as Parameters<typeof exportRebuildBundle.handler>[1], {} as Parameters<typeof exportRebuildBundle.handler>[2]);
+
+      const capture = JSON.parse(await readFile(path.join(rootDir, 'task-003', 'env', 'capture.json'), 'utf8')) as Record<string, unknown>;
+      const runtimeEvidence = capture.runtimeEvidence as Array<Record<string, unknown>>;
+      const filteredScript = capture.targetScript as Record<string, unknown>;
+
+      assert.strictEqual(runtimeEvidence.length, 1);
+      assert.strictEqual(runtimeEvidence[0].functionName, 'genH5st');
+      assert.strictEqual(filteredScript.url, 'https://storage.360buyimg.com/js/h5st.js');
+      assert.ok(!JSON.stringify(capture).includes('trackAd'));
+      assert.ok(!JSON.stringify(capture).includes('analytics'));
+    } finally {
+      runtime.reverseTaskStore = originalStore;
+      runtime.collector.getTopPriorityFiles = originals.getTopPriorityFiles;
+      runtime.pageController.getCookies = originals.getCookies;
+      runtime.pageController.getLocalStorage = originals.getLocalStorage;
+      runtime.pageController.getSessionStorage = originals.getSessionStorage;
+      runtime.pageController.getPage = originals.getPage;
+      await rm(rootDir, {recursive: true, force: true});
+    }
+  });
 });

@@ -182,6 +182,12 @@ args = [
 
 用于规范化执行前端 JS 逆向流程（页面观察、task artifact 沉淀、local rebuild、本地补环境、VMP 插桩、AST 去混淆、证据化输出）。
 
+配套模板：
+
+- `docs/reverse-update-prompt-template.md`
+- `docs/reverse-report-template.md`
+- `docs/algorithm-upgrade-template.md`
+
 ### 本地安装（在仓库目录）
 
 ```bash

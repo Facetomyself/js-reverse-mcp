@@ -8,6 +8,7 @@
    - `analyze_target`
    - `search_in_scripts`
    - `list_network_requests` / `get_request_initiator`
+   - 设定目标边界：`targetKeywords`、`targetUrlPatterns`、`targetFunctionNames`、`targetActionDescription`
 
 2. 运行时采样
    - `create_hook(fetch/xhr)` + `inject_hook`
@@ -30,3 +31,4 @@
 - 页面观察先于本地补环境
 - 本地补环境先于深度去混淆
 - 每一步都要写 task artifact
+- 参数名不明显时，优先靠请求、函数、时间窗和动作描述锁定目标

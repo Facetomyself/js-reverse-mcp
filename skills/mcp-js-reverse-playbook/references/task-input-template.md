@@ -1,9 +1,11 @@
 # 自动化任务输入模板
 - 目标 URL
-- 目标接口关键字
-- 目标字段（sign/token/...）
-- 触发动作
+- 目标接口关键字 / `targetUrlPatterns`
+- 目标字段 / `targetKeywords`
+- 目标函数 / `targetFunctionNames`
+- 触发动作 / `targetActionDescription`
 - 登录要求
 - 成功判定
+- 目标时间窗
 - 超时与重试策略
 - 是否允许补环境/断点
