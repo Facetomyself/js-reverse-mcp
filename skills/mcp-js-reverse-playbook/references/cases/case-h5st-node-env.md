@@ -42,27 +42,7 @@
 - 严禁提交真实会话数据（cookie/token/storage 值）。
 - 仅提交字段模板、流程文档、判定标准。
 
-## 可复用工作流（本地）
-1. 在本地任务目录放置运行文件（不入仓库）：
-- `artifacts/tasks-local/<task-id>/run/seed.mjs`
-- `artifacts/tasks-local/<task-id>/run/env.mjs`
-- `artifacts/tasks-local/<task-id>/run/sign.mjs`
-- `artifacts/tasks-local/<task-id>/run/verify*.mjs`
-
-2. 本地生成签名结构：
-- `node artifacts/tasks-local/<task-id>/run/verify.mjs`
-- 验证点：`h5st` 存在、分段数为 10、关键段长度（如第 8 段）与浏览器同量级。
-
-3. 本地 API 闭环验证（至少两个接口）：
-- `node artifacts/tasks-local/<task-id>/run/verify-api.mjs`
-- `node artifacts/tasks-local/<task-id>/run/verify-api2.mjs`
-- 验证点：`status=200` 且业务码正常（如 `rs=0`）。
-
-4. 响应可见化要求：
-- 输出 `status/业务码/关键字段`。
-- 输出脱敏样本（如商品 `id/price/name` 前缀、top-level keys）。
-- 不打印完整 cookie/token 原值。
-
-5. 回归测试：
-- `node --test artifacts/tasks-local/<task-id>/run/verify.test.mjs`
-- 目标：最小 smoke 测试稳定通过。
+## 维护边界
+- 本文件仅保留抽象映射与判定口径。
+- 站点级可复用工作流统一维护在 `scripts/cases/`：
+  - `scripts/cases/jd-h5st-pure-node.mjs`

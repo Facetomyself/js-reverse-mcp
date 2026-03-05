@@ -26,7 +26,7 @@
 - `scripts/cases/*`
 - case 文件只保留方法论与流程，不提供可执行实现代码。
 - `JD h5st` 复用 case：
-  `skills/mcp-js-reverse-playbook/references/cases/case-h5st-node-env.md`
+  `scripts/cases/jd-h5st-pure-node.mjs`
 
 3. case 也不足时，按模板新建任务
 - `docs/parameter-methodology-template.md`（站点无关方法论）
