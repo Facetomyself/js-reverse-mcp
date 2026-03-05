@@ -10,3 +10,13 @@
 - 目标时间窗
 - 超时与重试策略
 - 是否允许补环境/断点
+
+## 结构化输入（推荐）
+- 推荐使用 JSON Schema 约束输入结构：
+  - `references/schemas/reverse-task-input.schema.json`
+- 最小脱敏示例：
+  - `references/schemas/reverse-task-input.example.json`
+- 重点：
+  - 必填 `target/request/runtime/verify`
+  - 仅允许脱敏种子（`keys-only` 或 `masked-values`）
+  - 禁止提交真实 cookie/token/secrets

@@ -35,6 +35,8 @@
     "coverage:strict": "c8 --reporter=text --reporter=lcov node --require ./build/tests/setup.js --no-warnings=ExperimentalWarning --test-force-exit --test build/tests/unit/**/*.test.js build/tests/property/**/*.test.js",
     "coverage:full": "npm run coverage:strict",
     "verify-server-json-version": "node --experimental-strip-types scripts/verify-server-json-version.ts"
+    ,
+    "case:jd:h5st:pure-node": "node scripts/cases/jd-h5st-pure-node.mjs"
   },
   "files": [
     "build/src",

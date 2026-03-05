@@ -149,3 +149,8 @@ tests/.tmp/
 js-reverse-mcp-main/
 
 .DS_Store
+
+# Reverse engineering sensitive captures (cookies/storage/session state)
+artifacts/tasks/**/env/capture*.json
+artifacts/tasks/**/env/*session*.json
+artifacts/tasks/**/env/*cookie*.json
