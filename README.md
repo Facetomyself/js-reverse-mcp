@@ -14,6 +14,37 @@
 4. 分析签名链路、加密算法、调用栈
 5. 输出可执行的下一步动作（而不是只给概念）
 
+## 参数链路提交流程（优先）
+
+后续如果要沉淀“某个参数的可复现链路”，统一按下面流程执行：
+
+1. 先读本地任务目录（如果存在）
+- `artifacts/tasks-local/<task-id>/`
+- 这里是最高优先级，包含完整本地逆向过程与可执行脚本（默认不提交）。
+
+2. 本地目录不存在时，读抽象 case
+- `scripts/cases/*`
+- case 文件只保留方法论与流程，不提供可执行实现代码。
+
+3. case 也不足时，按模板新建任务
+- `docs/parameter-methodology-template.md`（站点无关方法论）
+- `docs/parameter-site-mapping-template.md`（站点映射补充）
+
+4. 本地任务目录建议结构（可复现全过程）
+- `task.json`：目标参数、目标请求、触发动作、验收标准
+- `runtime-evidence.jsonl`：每步证据（工具、输入摘要、输出摘要、结论）
+- `network.jsonl`：关键请求/响应摘要（脱敏）
+- `scripts.jsonl`：脚本定位记录（scriptId/url/offset/关键词）
+- `env/capture.json`：seed 与契约（仅键名/格式，不含敏感原值）
+- `env/env.js`、`env/polyfills.js`、`env/entry.js`：本地补环境文件
+- `run/`：本地可执行脚本与运行日志
+- `report.md`：结果、first divergence、下一步动作
+
+5. 安全边界
+- 仓库内仅保留抽象方法与流程文档。
+- 可执行逆向代码、完整链路产物、敏感采样一律放 `artifacts/tasks-local/`（git 忽略）。
+- 详见：`docs/case-safety-policy.md`、`docs/reverse-artifacts.md`。
+
 ## 核心能力
 
 - 脚本与源码分析：`list_scripts`、`get_script_source`、`find_in_script`、`search_in_scripts`
