@@ -159,3 +159,6 @@ artifacts/tasks/**/env/*cookie*.json
 .local-cases/
 .local-private/
 artifacts/tasks-local/
+
+# Never commit smoke task artifacts
+artifacts/tasks/smoke-task-*/
