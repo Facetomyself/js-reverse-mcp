@@ -144,4 +144,51 @@ describe('collector/hook regressions', () => {
       runtime.hookManager.clearAll();
     }
   });
+
+  it('get_hook_data summary should include hooks that only have records', async () => {
+    const runtime = getJSHookRuntime() as unknown as {
+      collector: {
+        getActivePage: RuntimeMethod;
+      };
+      hookManager: {
+        clearAll: RuntimeMethod;
+      };
+    };
+
+    const originalGetActivePage = runtime.collector.getActivePage;
+    runtime.hookManager.clearAll();
+
+    const orphanHookId = 'function_hook_only';
+    runtime.collector.getActivePage = (async () => ({
+      evaluate: async () => ({
+        [orphanHookId]: [
+          {
+            hookId: orphanHookId,
+            target: 'window.fetch',
+            event: 'call',
+            method: 'GET',
+            url: 'https://example.com/raw',
+            timestamp: Date.now(),
+          },
+        ],
+      }),
+    })) as RuntimeMethod;
+
+    try {
+      const response = makeResponse();
+      await (getHookData as unknown as ToolDefinitionHarness).handler(
+        {params: {view: 'summary'}},
+        response,
+        {},
+      );
+
+      const output = response.lines.join('\n');
+      assert.ok(output.includes(`"hookId": "${orphanHookId}"`));
+      assert.ok(output.includes('"type": "unknown"'));
+      assert.ok(output.includes('"total": 1'));
+    } finally {
+      runtime.collector.getActivePage = originalGetActivePage;
+      runtime.hookManager.clearAll();
+    }
+  });
 });

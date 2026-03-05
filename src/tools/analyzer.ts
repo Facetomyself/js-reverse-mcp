@@ -930,8 +930,8 @@ export const riskPanel = defineTool({
         hookSignalCount = runtime.hookManager.getRecords(request.params.hookId).length;
       } else {
         hookSignalCount = runtime.hookManager
-          .getAllHooks()
-          .reduce((sum, hook) => sum + runtime.hookManager.getRecords(hook.hookId).length, 0);
+          .getAllKnownHookIds()
+          .reduce((sum, hookId) => sum + runtime.hookManager.getRecords(hookId).length, 0);
       }
     }
 
@@ -980,8 +980,8 @@ export const exportSessionReport = defineTool({
     const summaries = runtime.collector.getCollectedFilesSummary();
     const collectorStats = await runtime.collector.getAllStats();
     const hookStats = runtime.hookManager.getStats();
-    const totalHookRecords = hookStats.hooks.reduce(
-      (sum, hook) => sum + runtime.hookManager.getRecords(hook.hookId).length,
+    const totalHookRecords = runtime.hookManager.getAllKnownHookIds().reduce(
+      (sum, hookId) => sum + runtime.hookManager.getRecords(hookId).length,
       0,
     );
     const tokenStats = TokenBudgetManager.getInstance().getStats();

@@ -1597,37 +1597,59 @@ export const hookFunction = defineTool({
 
   // Store original and hooks registry
   window.__mcp_hooks__ = window.__mcp_hooks__ || {};
+  window.__hookStore = window.__hookStore || {};
   if (window.__mcp_hooks__[hookId]) {
     return { success: false, message: 'Hook already exists with id: ' + hookId };
+  }
+  if (!window.__hookStore[hookId]) {
+    window.__hookStore[hookId] = [];
   }
 
   const original = obj[methodName];
   window.__mcp_hooks__[hookId] = { obj, methodName, original };
+
+  const safeClone = (value) => {
+    try {
+      if (typeof value === 'function') return '[Function]';
+      if (typeof Element !== 'undefined' && value instanceof Element) {
+        return '[Element: ' + value.tagName + ']';
+      }
+      return JSON.parse(JSON.stringify(value));
+    } catch (e) {
+      try {
+        return String(value);
+      } catch {
+        return '[Unserializable]';
+      }
+    }
+  };
+
+  const pushHookData = (record) => {
+    const store = window.__hookStore[hookId];
+    if (!Array.isArray(store)) return;
+    store.push(record);
+    if (store.length > 1000) store.shift();
+  };
 
   // Create hooked function
   obj[methodName] = function(...args) {
     const callInfo = {
       hook: hookId,
       target: objectPath + '.' + methodName,
-      timestamp: new Date().toISOString(),
+      timestamp: Date.now(),
+      isoTime: new Date().toISOString(),
+      event: 'call',
     };
 
     if (logArgs) {
-      callInfo.arguments = args.map(arg => {
-        try {
-          if (typeof arg === 'function') return '[Function]';
-          if (arg instanceof Element) return '[Element: ' + arg.tagName + ']';
-          return JSON.parse(JSON.stringify(arg));
-        } catch(e) {
-          return String(arg);
-        }
-      });
+      callInfo.arguments = args.map(arg => safeClone(arg));
     }
 
     if (logStack) {
       callInfo.stack = new Error().stack?.split('\\n').slice(2, 6).map(s => s.trim());
     }
 
+    pushHookData(callInfo);
     console.log('[MCP Hook]', callInfo);
 
     try {
@@ -1637,31 +1659,59 @@ export const hookFunction = defineTool({
       if (result && typeof result.then === 'function') {
         return result.then(res => {
           if (logResult) {
-            try {
-              const resInfo = typeof res === 'object' ? JSON.parse(JSON.stringify(res)) : res;
-              console.log('[MCP Hook Result]', { hook: hookId, result: resInfo });
-            } catch(e) {
-              console.log('[MCP Hook Result]', { hook: hookId, result: String(res) });
-            }
+            const resInfo = safeClone(res);
+            const resultInfo = {
+              hook: hookId,
+              target: objectPath + '.' + methodName,
+              timestamp: Date.now(),
+              isoTime: new Date().toISOString(),
+              event: 'result',
+              result: resInfo,
+            };
+            pushHookData(resultInfo);
+            console.log('[MCP Hook Result]', { hook: hookId, result: resInfo });
           }
           return res;
         }).catch(err => {
+          const errorInfo = {
+            hook: hookId,
+            target: objectPath + '.' + methodName,
+            timestamp: Date.now(),
+            isoTime: new Date().toISOString(),
+            event: 'error',
+            error: err && err.message ? err.message : String(err),
+          };
+          pushHookData(errorInfo);
           console.log('[MCP Hook Error]', { hook: hookId, error: err.message });
           throw err;
         });
       }
 
       if (logResult) {
-        try {
-          const resInfo = typeof result === 'object' ? JSON.parse(JSON.stringify(result)) : result;
-          console.log('[MCP Hook Result]', { hook: hookId, result: resInfo });
-        } catch(e) {
-          console.log('[MCP Hook Result]', { hook: hookId, result: String(result) });
-        }
+        const resInfo = safeClone(result);
+        const resultInfo = {
+          hook: hookId,
+          target: objectPath + '.' + methodName,
+          timestamp: Date.now(),
+          isoTime: new Date().toISOString(),
+          event: 'result',
+          result: resInfo,
+        };
+        pushHookData(resultInfo);
+        console.log('[MCP Hook Result]', { hook: hookId, result: resInfo });
       }
 
       return result;
     } catch(err) {
+      const errorInfo = {
+        hook: hookId,
+        target: objectPath + '.' + methodName,
+        timestamp: Date.now(),
+        isoTime: new Date().toISOString(),
+        event: 'error',
+        error: err && err.message ? err.message : String(err),
+      };
+      pushHookData(errorInfo);
       console.log('[MCP Hook Error]', { hook: hookId, error: err.message });
       throw err;
     }

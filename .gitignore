@@ -154,3 +154,8 @@ js-reverse-mcp-main/
 artifacts/tasks/**/env/capture*.json
 artifacts/tasks/**/env/*session*.json
 artifacts/tasks/**/env/*cookie*.json
+
+# Local-only executable reverse cases (never commit)
+.local-cases/
+.local-private/
+artifacts/tasks-local/

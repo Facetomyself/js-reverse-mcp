@@ -118,6 +118,35 @@ function makeDisabledContext(): ToolContextHarness {
 }
 
 describe('debugger tools error paths', () => {
+  it('hook_function should write records into single __hookStore', async () => {
+    const response = makeResponse();
+    let capturedScript = '';
+    const context: ToolContextHarness = {
+      debuggerContext: {
+        isEnabled: () => true,
+      },
+      getSelectedPage: () => ({evaluate: async () => ({})}),
+      getSelectedFrame: () => ({
+        evaluate: async (script: string) => {
+          capturedScript = script;
+          return {success: true, hookId: 'h_store'};
+        },
+      }),
+      getNetworkRequestById: () => ({url: () => 'https://example.com'}),
+      getRequestInitiator: () => undefined,
+    };
+
+    await hookFunction.handler(
+      {params: {target: 'window.fetch', hookId: 'h_store', logArgs: true, logResult: true, logStack: false}},
+      response as unknown as Parameters<typeof hookFunction.handler>[1],
+      context as unknown as Parameters<typeof hookFunction.handler>[2],
+    );
+
+    assert.ok(capturedScript.includes('window.__hookStore = window.__hookStore || {}'));
+    assert.ok(capturedScript.includes('window.__hookStore[hookId]'));
+    assert.ok(!capturedScript.includes('__mcp_hook_data__'));
+  });
+
   it('covers debugger-disabled early-return branches', async () => {
     const response = makeResponse();
     const context = makeDisabledContext();

@@ -244,6 +244,20 @@ export class HookManager {
     return Array.from(this.hooks.values());
   }
 
+  /** 获取已有采集记录的 hookId 列表（含无元数据的 hook） */
+  getRecordedHookIds(): string[] {
+    return Array.from(this.hookData.keys());
+  }
+
+  /** 获取所有已知 hookId（元数据 + 记录） */
+  getAllKnownHookIds(): string[] {
+    const ids = new Set<string>([
+      ...this.hooks.keys(),
+      ...this.hookData.keys(),
+    ]);
+    return Array.from(ids);
+  }
+
   /** 启用 hook */
   enable(hookId: string): boolean {
     const meta = this.hooks.get(hookId);

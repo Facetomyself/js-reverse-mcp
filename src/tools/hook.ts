@@ -227,12 +227,14 @@ export const getHookData = defineTool({
           }
         : records;
     } else if (view === 'summary') {
-      const hooks = runtime.hookManager.getAllHooks();
-      data = hooks.map((hook) => {
-        const records = (runtime.hookManager.getRecords(hook.hookId) as Array<Record<string, unknown>>)
+      const hookIds = runtime.hookManager.getAllKnownHookIds();
+      data = hookIds.map((hookId) => {
+        const records = (runtime.hookManager.getRecords(hookId) as Array<Record<string, unknown>>)
           .map(normalizeHookRecord);
+        const meta = runtime.hookManager.getHook(hookId);
         return {
-          hookId: hook.hookId,
+          hookId,
+          type: meta?.type ?? 'unknown',
           ...summarizeHookRecords(records, maxRecords),
           candidateEnvNeeds: inferCandidateEnvNeeds(records),
           requestBindings: buildRequestBindings(records),

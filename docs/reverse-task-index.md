@@ -10,6 +10,14 @@
 4. local rebuild
 5. 本地补环境
 
+读取优先级（强制）：
+
+1. 先读 `artifacts/tasks-local/<task-id>/`（若存在）
+2. 再读 `scripts/cases/*` 抽象 case
+3. 最后按模板新建流程：
+   - `docs/parameter-methodology-template.md`
+   - `docs/parameter-site-mapping-template.md`
+
 ## 1) 快速摸清页面加载了什么脚本
 
 - `list_scripts`
@@ -116,3 +124,14 @@
 ## 11) 参数总表
 
 完整参数与字段说明请查：`docs/tool-reference.md`
+
+## 12) 参数复现模板复用（推荐）
+
+遇到“某个参数可复现”任务时，先走模板而不是临时写脚本：
+
+1. 先填站点无关模板：`docs/parameter-methodology-template.md`
+2. 再填站点映射模板：`docs/parameter-site-mapping-template.md`
+3. 按模板执行 Observe/Capture/Rebuild/Verify
+4. 可执行代码与完整链路仅放 `artifacts/tasks-local/<task-id>/`，不入库
+
+安全约束：`docs/case-safety-policy.md`
