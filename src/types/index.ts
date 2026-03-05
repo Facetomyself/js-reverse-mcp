@@ -1,4 +1,10 @@
 
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 
 /**
  * 核心类型定义
@@ -781,6 +787,50 @@ export interface GetScopeVariablesResult {
   }>;
   totalScopes: number;
   successfulScopes: number;
+}
+
+// ==================== Reverse Task Artifacts ====================
+
+export interface ReverseTaskStoreOptions {
+  rootDir?: string;
+}
+
+export interface ReverseTaskOpenInput {
+  taskId: string;
+  slug: string;
+  targetUrl: string;
+  goal: string;
+}
+
+export interface ReverseTaskDescriptor {
+  taskId: string;
+  slug: string;
+  targetUrl: string;
+  goal: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ReverseTaskEvent {
+  stage: string;
+  action: string;
+  status: string;
+  [key: string]: unknown;
+}
+
+export interface ReverseTaskHandle {
+  taskId: string;
+  taskDir: string;
+  descriptor: ReverseTaskDescriptor;
+  appendTimeline(event: ReverseTaskEvent): Promise<void>;
+  appendLog(name: string, value: Record<string, unknown>): Promise<void>;
+  writeSnapshot(name: string, value: unknown): Promise<void>;
+}
+
+export interface ReverseTaskReadApi {
+  getTaskDir(taskId: string): string;
+  readSnapshot<T>(taskId: string, name: string): Promise<T | undefined>;
+  readLog(name: string, taskId: string): Promise<Record<string, unknown>[]>;
 }
 
 // ==================== 全局类型扩展 ====================

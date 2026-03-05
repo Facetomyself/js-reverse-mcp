@@ -1,35 +1,42 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import { PageController } from '../../../src/modules/collector/PageController.js';
 
 function makePage() {
-  const page: Record<string, any> = {
-    goto: async () => {},
+  const page: Record<string, unknown> = {
+    goto: async () => undefined,
     title: async () => 'Example',
     url: () => 'https://example.com',
-    reload: async () => {},
-    goBack: async () => {},
-    goForward: async () => {},
-    click: async () => {},
-    type: async () => {},
-    select: async () => {},
-    hover: async () => {},
+    reload: async () => undefined,
+    goBack: async () => undefined,
+    goForward: async () => undefined,
+    click: async () => undefined,
+    type: async () => undefined,
+    select: async () => undefined,
+    hover: async () => undefined,
     evaluate: async () => ({}),
-    waitForSelector: async () => {},
-    waitForNavigation: async () => {},
+    evaluateOnNewDocument: async () => undefined,
+    waitForSelector: async () => undefined,
+    waitForNavigation: async () => undefined,
     content: async () => '<html></html>',
     screenshot: async () => Buffer.from('img'),
-    setCookie: async () => {},
+    setCookie: async () => undefined,
     cookies: async () => [{ name: 'sid', value: '1' }],
-    deleteCookie: async () => {},
-    setViewport: async () => {},
-    setUserAgent: async () => {},
-    waitForNetworkIdle: async () => {},
+    deleteCookie: async () => undefined,
+    setViewport: async () => undefined,
+    setUserAgent: async () => undefined,
+    waitForNetworkIdle: async () => undefined,
     keyboard: {
-      press: async () => {},
+      press: async () => undefined,
     },
     $: async () => ({
-      uploadFile: async () => {},
+      uploadFile: async () => undefined,
     }),
   };
   return page;
@@ -38,7 +45,9 @@ function makePage() {
 describe('PageController', () => {
   it('covers navigation and interaction wrappers', async () => {
     const page = makePage();
-    const controller = new PageController({ getActivePage: async () => page } as any);
+    const controller = new PageController({
+      getActivePage: async () => page,
+    } as unknown as ConstructorParameters<typeof PageController>[0]);
 
     const nav = await controller.navigate('https://example.com', {
       waitUntil: 'load',
@@ -70,6 +79,12 @@ describe('PageController', () => {
 
   it('covers screenshot, metrics, storage, cookies and device helpers', async () => {
     const page = makePage();
+    let preloadCallback: ((script: string) => void) | undefined;
+    let preloadScriptArg: string | undefined;
+    page.evaluateOnNewDocument = async (callback: (script: string) => void, script: string) => {
+      preloadCallback = callback;
+      preloadScriptArg = script;
+    };
     let deleteCookieArgsLen = 0;
     page.deleteCookie = async (...args: unknown[]) => {
       deleteCookieArgsLen = args.length;
@@ -93,7 +108,9 @@ describe('PageController', () => {
     ];
     page.evaluate = async () => evaluateResults.shift();
 
-    const controller = new PageController({ getActivePage: async () => page } as any);
+    const controller = new PageController({
+      getActivePage: async () => page,
+    } as unknown as ConstructorParameters<typeof PageController>[0]);
     const shot = await controller.screenshot({
       path: 'tests/.tmp/page-controller/snap.png',
       type: 'png',
@@ -105,6 +122,12 @@ describe('PageController', () => {
     assert.strictEqual(metrics.total, 6);
 
     await controller.injectScript('window.__x=1');
+    await controller.injectScriptOnNewDocument('globalThis.__preload=1');
+    assert.ok(preloadCallback);
+    assert.strictEqual(preloadScriptArg, 'globalThis.__preload=1');
+    preloadCallback?.(preloadScriptArg as string);
+    assert.strictEqual((globalThis as unknown as {__preload?: number}).__preload, 1);
+    delete (globalThis as unknown as {__preload?: number}).__preload;
     await controller.setCookies([{ name: 'sid', value: '1' }]);
     const cookies = await controller.getCookies();
     assert.strictEqual(cookies.length, 1);
@@ -128,7 +151,7 @@ describe('PageController', () => {
     assert.strictEqual(Array.isArray(links), true);
 
     const activePage = await controller.getPage();
-    assert.strictEqual(activePage, page as any);
+    assert.strictEqual(activePage, page);
   });
 
   it('returns failure result for waitForSelector timeout and upload errors', async () => {
@@ -137,7 +160,9 @@ describe('PageController', () => {
       throw new Error('timeout');
     };
 
-    const controller = new PageController({ getActivePage: async () => page } as any);
+    const controller = new PageController({
+      getActivePage: async () => page,
+    } as unknown as ConstructorParameters<typeof PageController>[0]);
     const waited = await controller.waitForSelector('#missing', 10);
     assert.strictEqual(waited.success, false);
 

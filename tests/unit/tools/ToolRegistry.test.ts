@@ -1,8 +1,14 @@
-import {describe, it} from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
-import {ToolRegistry} from '../../../src/tools/ToolRegistry.js';
-import {ToolCategory} from '../../../src/tools/categories.js';
+import {describe, it} from 'node:test';
+
 import {zod} from '../../../src/third_party/index.js';
+import {ToolCategory} from '../../../src/tools/categories.js';
+import {ToolRegistry} from '../../../src/tools/ToolRegistry.js';
 
 describe('ToolRegistry', () => {
   it('registers and retrieves tools', () => {
@@ -12,7 +18,7 @@ describe('ToolRegistry', () => {
       description: 'sample',
       annotations: {category: ToolCategory.DEBUGGING, readOnlyHint: true},
       schema: {input: zod.string()},
-      handler: async () => {},
+      handler: async () => undefined,
     };
 
     registry.register(tool);
@@ -28,7 +34,7 @@ describe('ToolRegistry', () => {
       description: 'sample',
       annotations: {category: ToolCategory.DEBUGGING, readOnlyHint: true},
       schema: {},
-      handler: async () => {},
+      handler: async () => undefined,
     };
 
     registry.register(tool);
@@ -44,14 +50,14 @@ describe('ToolRegistry', () => {
         description: 'a',
         annotations: {category: ToolCategory.NAVIGATION, readOnlyHint: true},
         schema: {},
-        handler: async () => {},
+        handler: async () => undefined,
       },
       {
         name: 'tool_b',
         description: 'b',
         annotations: {category: ToolCategory.DEBUGGING, readOnlyHint: false},
         schema: {},
-        handler: async () => {},
+        handler: async () => undefined,
       },
     ];
 
@@ -72,7 +78,7 @@ describe('ToolRegistry', () => {
       description: 'sample',
       annotations: {category: ToolCategory.DEBUGGING, readOnlyHint: true},
       schema: {},
-      handler: async () => {},
+      handler: async () => undefined,
     };
 
     registry.register(tool);
@@ -90,7 +96,7 @@ describe('ToolRegistry', () => {
         description: 'conflict',
         annotations: {category: ToolCategory.DEBUGGING, readOnlyHint: true},
         schema: {},
-        handler: async () => {},
+        handler: async () => undefined,
       });
     }, /Tool name conflicts with alias/);
 
@@ -101,7 +107,7 @@ describe('ToolRegistry', () => {
         description: 'conflict',
         annotations: {category: ToolCategory.DEBUGGING, readOnlyHint: true},
         schema: {},
-        handler: async () => {},
+        handler: async () => undefined,
       });
     }, /Tool alias conflict/);
   });

@@ -1,6 +1,34 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import { CodeCompressor } from '../../../src/modules/collector/CodeCompressor.js';
+
+interface CodeCompressorHarness {
+  CACHE_TTL: number;
+  cache: Map<string, { timestamp: number }>;
+  compress(
+    source: string,
+    options: { level: number; maxRetries?: number; useCache?: boolean },
+  ): Promise<{ compressed: string; originalSize: number }>;
+  generateCacheKey(source: string, level: number): string;
+  getCacheSize(): number;
+  clearCache(): void;
+  shouldCompress(source: string, threshold: number): boolean;
+  selectCompressionLevel(size: number): number;
+  compressStream(
+    source: string,
+    options: { chunkSize: number; onProgress?: (progress: number) => void },
+  ): Promise<{
+    compressed: string;
+    chunks?: number;
+    metadata?: { compressionTime?: number };
+  }>;
+}
 
 describe('CodeCompressor extended', () => {
   it('compress/decompress, cache hit, stats and reset', async () => {
@@ -25,7 +53,7 @@ describe('CodeCompressor extended', () => {
   });
 
   it('handles cache expiry and clearCache/getCacheSize', async () => {
-    const c = new CodeCompressor() as any;
+    const c = new CodeCompressor() as unknown as CodeCompressorHarness;
     const src = 'const longText = "' + 'a'.repeat(3000) + '";';
 
     await c.compress(src, { level: 6 });
@@ -92,7 +120,7 @@ describe('CodeCompressor extended', () => {
   });
 
   it('covers shouldCompress/selectCompressionLevel/compressStream and LRU cache eviction', async () => {
-    const c = new CodeCompressor() as any;
+    const c = new CodeCompressor() as unknown as CodeCompressorHarness;
 
     assert.strictEqual(c.shouldCompress('x'.repeat(500), 1024), false);
     assert.strictEqual(c.shouldCompress('x'.repeat(2000), 1024), true);

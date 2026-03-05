@@ -1,9 +1,51 @@
-import { describe, it, beforeEach, afterEach } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
-import puppeteer from 'puppeteer';
 import fs from 'node:fs';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+
+import puppeteer from 'puppeteer';
+
 import { BrowserModeManager } from '../../../src/modules/browser/BrowserModeManager.js';
 import { StealthScripts2025 } from '../../../src/modules/stealth/StealthScripts2025.js';
+
+interface BrowserLaunchHarness {
+  isConnected(): boolean;
+  disconnect?(): Promise<void>;
+  newPage?(): Promise<PageHarness>;
+}
+
+interface PageHarness {
+  evaluateOnNewDocument(): Promise<void>;
+  on(event: string, handler: () => void): void;
+  setCacheEnabled(value: boolean): Promise<void>;
+  setBypassCSP(value: boolean): Promise<void>;
+  setJavaScriptEnabled(value: boolean): Promise<void>;
+  setCookie(...cookies: Array<{name: string; value: string}>): Promise<void>;
+  goto?(url: string): Promise<void>;
+}
+
+interface BrowserManagerHarness {
+  detectAllBrowsers(): Array<{name: string; path: string}>;
+  waitForBrowser(timeout: number): Promise<void>;
+  launchBrowserProcess(): Promise<void>;
+  injectAntiDetectionScripts(page: PageHarness): Promise<void>;
+  launch(): Promise<BrowserLaunchHarness>;
+  newPage(): Promise<PageHarness>;
+  getCurrentPage(): PageHarness | null;
+  browser: BrowserLaunchHarness | null;
+  currentPage: PageHarness | null;
+  sessionData: {cookies?: Array<{name: string; value: string}>};
+  browserProcess?: {killed: boolean; kill(signal: string): void} | null;
+  autoLaunched?: boolean;
+}
+
+interface BrowserModeManagerStaticHarness {
+  detectedBrowsersCache: Array<{name: string; path: string}> | null;
+}
 
 describe('BrowserModeManager extended', () => {
   let originalConnect: typeof puppeteer.connect;
@@ -14,8 +56,8 @@ describe('BrowserModeManager extended', () => {
 
   afterEach(() => {
     puppeteer.connect = originalConnect;
-    (BrowserModeManager as any).detectedBrowsersCache = null;
-    (StealthScripts2025 as any).injectAll = originalInjectAll;
+    (BrowserModeManager as unknown as BrowserModeManagerStaticHarness).detectedBrowsersCache = null;
+    (StealthScripts2025 as unknown as {injectAll: typeof StealthScripts2025.injectAll}).injectAll = originalInjectAll;
   });
 
   let originalInjectAll: typeof StealthScripts2025.injectAll;
@@ -30,7 +72,7 @@ describe('BrowserModeManager extended', () => {
       autoLaunch: false,
       useStealthScripts: false,
     });
-    const list = (manager as any).detectAllBrowsers();
+    const list = (manager as unknown as BrowserManagerHarness).detectAllBrowsers();
     assert.strictEqual(list.length, 1);
     assert.strictEqual(list[0]?.name, 'Custom Browser');
   });
@@ -41,18 +83,15 @@ describe('BrowserModeManager extended', () => {
       useStealthScripts: false,
     });
 
-    puppeteer.connect = async () => ({ disconnect: () => {} } as any);
-    await (manager as any).waitForBrowser(20);
+    puppeteer.connect = (async () => ({ disconnect: () => undefined } as unknown as Awaited<ReturnType<typeof puppeteer.connect>>)) as typeof puppeteer.connect;
+    await (manager as unknown as BrowserManagerHarness).waitForBrowser(20);
 
-    puppeteer.connect = async () => {
+    puppeteer.connect = (async () => {
       throw new Error('down');
-    };
-    await assert.rejects(
-      async () => {
-        await (manager as any).waitForBrowser(30);
-      },
-      /Browser failed to start within timeout/,
-    );
+    }) as typeof puppeteer.connect;
+    await assert.rejects(async () => {
+      await (manager as unknown as BrowserManagerHarness).waitForBrowser(30);
+    }, /Browser failed to start within timeout/);
   });
 
   it('launch handles direct connect, autoLaunch fallback, and no-autoLaunch failure', async () => {
@@ -62,24 +101,24 @@ describe('BrowserModeManager extended', () => {
     });
 
     // direct connect success
-    const browser = { isConnected: () => true };
-    puppeteer.connect = async () => browser as any;
+    const browser: BrowserLaunchHarness = { isConnected: () => true };
+    puppeteer.connect = (async () => browser as unknown as Awaited<ReturnType<typeof puppeteer.connect>>) as typeof puppeteer.connect;
     const direct = await manager.launch();
-    assert.strictEqual(direct, browser as any);
+    assert.strictEqual(direct, browser as unknown as typeof direct);
 
     // force reconnect path
-    (manager as any).browser = null;
+    (manager as unknown as BrowserManagerHarness).browser = null;
     let callCount = 0;
-    puppeteer.connect = async () => {
+    puppeteer.connect = (async () => {
       callCount += 1;
       if (callCount === 1) {
         throw new Error('first failed');
       }
-      return browser as any;
-    };
-    (manager as any).launchBrowserProcess = async () => {};
+      return browser as unknown as Awaited<ReturnType<typeof puppeteer.connect>>;
+    }) as typeof puppeteer.connect;
+    (manager as unknown as BrowserManagerHarness).launchBrowserProcess = async () => undefined;
     const fallback = await manager.launch();
-    assert.strictEqual(fallback, browser as any);
+    assert.strictEqual(fallback, browser as unknown as typeof fallback);
 
     // no autoLaunch -> throw
     const managerNoAuto = new BrowserModeManager({
@@ -87,9 +126,9 @@ describe('BrowserModeManager extended', () => {
       useStealthScripts: false,
       remoteDebuggingPort: 9333,
     });
-    puppeteer.connect = async () => {
+    puppeteer.connect = (async () => {
       throw new Error('connect fail');
-    };
+    }) as typeof puppeteer.connect;
     await assert.rejects(
       async () => {
         await managerNoAuto.launch();
@@ -105,35 +144,51 @@ describe('BrowserModeManager extended', () => {
     });
 
     let injected = 0;
-    const page = {
+    const browser: BrowserLaunchHarness = { isConnected: () => true };
+    const page: PageHarness = {
       evaluateOnNewDocument: async () => {
         injected += 1;
       },
+      on: () => undefined,
+      setCacheEnabled: async () => undefined,
+      setBypassCSP: async () => undefined,
+      setJavaScriptEnabled: async () => undefined,
+      setCookie: async () => undefined,
     };
-    await (manager as any).injectAntiDetectionScripts(page);
+    await (manager as unknown as BrowserManagerHarness).injectAntiDetectionScripts(page);
     assert.strictEqual(injected, 1);
 
-    (manager as any).browser = { id: 'b' };
-    (manager as any).currentPage = { id: 'p' };
+    (manager as unknown as BrowserManagerHarness).browser = browser;
+    (manager as unknown as BrowserManagerHarness).currentPage = page;
     assert.ok(manager.getBrowser());
     assert.ok(manager.getCurrentPage());
   });
 
   it('returns cached detected browser list when available', () => {
-    (BrowserModeManager as any).detectedBrowsersCache = [{ name: 'Cached', path: '/tmp/browser' }];
+    (BrowserModeManager as unknown as BrowserModeManagerStaticHarness).detectedBrowsersCache = [{ name: 'Cached', path: '/tmp/browser' }];
     const manager = new BrowserModeManager({
       autoLaunch: false,
       useStealthScripts: false,
     });
 
-    const list = (manager as any).detectAllBrowsers();
+    const list = (manager as unknown as BrowserManagerHarness).detectAllBrowsers();
     assert.deepStrictEqual(list, [{ name: 'Cached', path: '/tmp/browser' }]);
   });
 
   it('newPage triggers stealth injection when enabled', async () => {
     let injected = 0;
-    (StealthScripts2025 as any).injectAll = async () => {
+    (StealthScripts2025 as unknown as {injectAll: typeof StealthScripts2025.injectAll}).injectAll = async () => {
       injected += 1;
+      return {
+        preset: 'linux-chrome',
+        injectedFeatures: ['x'],
+        skippedFeatures: [],
+        userAgent: 'ua',
+        platform: 'linux',
+        scriptCount: 1,
+        injectedScripts: ['x'],
+        errors: [],
+      };
     };
 
     const manager = new BrowserModeManager({
@@ -142,16 +197,17 @@ describe('BrowserModeManager extended', () => {
       stealthPreset: 'linux-chrome',
     });
 
-    const page = {
-      on: () => {},
-      setCacheEnabled: async () => {},
-      setBypassCSP: async () => {},
-      setJavaScriptEnabled: async () => {},
-      setCookie: async () => {},
-      evaluateOnNewDocument: async () => {},
+    const page: PageHarness = {
+      on: () => undefined,
+      setCacheEnabled: async () => undefined,
+      setBypassCSP: async () => undefined,
+      setJavaScriptEnabled: async () => undefined,
+      setCookie: async () => undefined,
+      evaluateOnNewDocument: async () => undefined,
     };
-    (manager as any).browser = {
+    (manager as unknown as BrowserManagerHarness).browser = {
       newPage: async () => page,
+      isConnected: () => true,
     };
 
     await manager.newPage();
@@ -167,23 +223,23 @@ describe('BrowserModeManager extended', () => {
       waitForBrowserPollMs: 1,
     });
 
-    (manager as any).detectAllBrowsers = () => [];
+    (manager as unknown as BrowserManagerHarness).detectAllBrowsers = () => [];
     await assert.rejects(
       async () => {
-        await (manager as any).launchBrowserProcess();
+        await (manager as unknown as BrowserManagerHarness).launchBrowserProcess();
       },
       /Cannot find browser executable/,
     );
 
-    (manager as any).detectAllBrowsers = () => [
+    (manager as unknown as BrowserManagerHarness).detectAllBrowsers = () => [
       { name: 'Echo', path: '/bin/echo' },
       { name: 'Echo2', path: '/bin/echo' },
     ];
-    (manager as any).waitForBrowser = async () => {};
+    (manager as unknown as BrowserManagerHarness).waitForBrowser = async () => undefined;
 
-    await (manager as any).launchBrowserProcess();
-    assert.strictEqual((manager as any).autoLaunched, true);
-    assert.ok((manager as any).browserProcess);
+    await (manager as unknown as BrowserManagerHarness).launchBrowserProcess();
+    assert.strictEqual((manager as unknown as {autoLaunched: boolean}).autoLaunched, true);
+    assert.ok((manager as unknown as {browserProcess: unknown}).browserProcess);
   });
 
   it('covers detectAllBrowsers default scan path and goto branches', async () => {
@@ -192,7 +248,7 @@ describe('BrowserModeManager extended', () => {
       useStealthScripts: false,
     });
 
-    const found = (manager as any).detectAllBrowsers();
+    const found = (manager as unknown as BrowserManagerHarness).detectAllBrowsers();
     assert.ok(Array.isArray(found));
 
     await assert.rejects(
@@ -208,9 +264,9 @@ describe('BrowserModeManager extended', () => {
         navigated += Number(url.includes('example.com'));
       },
     };
-    (manager as any).currentPage = page;
+    (manager as unknown as BrowserManagerHarness).currentPage = page as unknown as PageHarness;
     const out = await manager.goto('https://example.com');
-    assert.strictEqual(out, page as any);
+    assert.strictEqual(out, page as unknown as typeof out);
     assert.strictEqual(navigated, 1);
   });
 
@@ -221,10 +277,10 @@ describe('BrowserModeManager extended', () => {
       remoteDebuggingPort: 9444,
     });
 
-    puppeteer.connect = async () => {
+    puppeteer.connect = (async () => {
       throw new Error('connect failed');
-    };
-    (manager as any).launchBrowserProcess = async () => {
+    }) as typeof puppeteer.connect;
+    (manager as unknown as BrowserManagerHarness).launchBrowserProcess = async () => {
       throw new Error('spawn failed');
     };
 
@@ -240,7 +296,7 @@ describe('BrowserModeManager extended', () => {
     const manager = new BrowserModeManager({
       autoLaunch: false,
       useStealthScripts: false,
-    }) as any;
+    }) as unknown as BrowserManagerHarness;
 
     let closeHandler: (() => void) | undefined;
     const page = {
@@ -249,22 +305,22 @@ describe('BrowserModeManager extended', () => {
           closeHandler = handler;
         }
       },
-      setCacheEnabled: async () => {},
-      setBypassCSP: async () => {},
-      setJavaScriptEnabled: async () => {},
-      setCookie: async () => {},
-      evaluateOnNewDocument: async () => {},
+      setCacheEnabled: async () => undefined,
+      setBypassCSP: async () => undefined,
+      setJavaScriptEnabled: async () => undefined,
+      setCookie: async () => undefined,
+      evaluateOnNewDocument: async () => undefined,
     };
 
-    manager.injectAntiDetectionScripts = async () => {};
+    manager.injectAntiDetectionScripts = async () => undefined;
     manager.launch = async () => {
-      manager.browser = { newPage: async () => page };
+      manager.browser = { newPage: async () => page, isConnected: () => true };
       return manager.browser;
     };
     manager.sessionData = { cookies: [{ name: 'k', value: 'v' }] };
 
     const out = await manager.newPage();
-    assert.strictEqual(out, page as any);
+    assert.strictEqual(out, page as unknown as typeof out);
     assert.ok(closeHandler);
 
     closeHandler!();
@@ -285,11 +341,11 @@ describe('BrowserModeManager extended', () => {
         useStealthScripts: false,
       });
 
-      const list = (manager as any).detectAllBrowsers();
-      assert.ok(list.some((b: any) => String(b.path).includes(fakeWinPath)));
+      const list = (manager as unknown as BrowserManagerHarness).detectAllBrowsers();
+      assert.ok(list.some((b: {path: string}) => String(b.path).includes(fakeWinPath)));
 
       // cached branch still works after first detection
-      const list2 = (manager as any).detectAllBrowsers();
+      const list2 = (manager as unknown as BrowserManagerHarness).detectAllBrowsers();
       assert.ok(Array.isArray(list2));
     } finally {
       Object.defineProperty(process, 'platform', { value: originalPlatform });
@@ -300,21 +356,26 @@ describe('BrowserModeManager extended', () => {
           // Ignore cleanup errors on environments where this path is protected.
         }
       }
-      (BrowserModeManager as any).detectedBrowsersCache = null;
+      (BrowserModeManager as unknown as BrowserModeManagerStaticHarness).detectedBrowsersCache = null;
     }
   });
 
   it('executes anti-detection callback and close cleanup branches', async () => {
+    const globals = globalThis as typeof globalThis & {
+      navigator?: { permissions: { query: (permission: {name: string}) => Promise<{state: string}> }; webdriver?: undefined };
+      window?: { navigator: { permissions: { query: (permission: {name: string}) => Promise<{state: string}> } }; chrome?: unknown };
+      Notification?: { permission: string };
+    };
     const backup = {
-      navigator: (globalThis as any).navigator,
-      window: (globalThis as any).window,
-      Notification: (globalThis as any).Notification,
+      navigator: globals.navigator,
+      window: globals.window,
+      Notification: globals.Notification,
     };
     const setGlobal = (key: string, value: unknown) => {
       Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
     };
 
-    const nav: any = { permissions: { query: (_p: any) => Promise.resolve({ state: 'granted' }) } };
+    const nav = { permissions: { query: (_p: {name: string}) => Promise.resolve({ state: 'granted' }) } };
     setGlobal('navigator', nav);
     setGlobal('window', { navigator: nav });
     setGlobal('Notification', { permission: 'default' });
@@ -328,9 +389,17 @@ describe('BrowserModeManager extended', () => {
         evaluateOnNewDocument: async (fn: () => void) => {
           fn();
         },
+        on: () => undefined,
+        setCacheEnabled: async () => undefined,
+        setBypassCSP: async () => undefined,
+        setJavaScriptEnabled: async () => undefined,
+        setCookie: async () => undefined,
+      } as unknown as PageHarness & {
+        evaluateOnNewDocument(fn: () => void): Promise<void>;
       };
-      await (manager as any).injectAntiDetectionScripts(page);
-      assert.strictEqual((globalThis as any).navigator.webdriver, undefined);
+      await (manager as unknown as BrowserManagerHarness).injectAntiDetectionScripts(page);
+      const navigatorState = globals.navigator as {webdriver?: undefined} | undefined;
+      assert.strictEqual(navigatorState?.webdriver, undefined);
 
       const killer = {
         killed: false,
@@ -338,18 +407,19 @@ describe('BrowserModeManager extended', () => {
           killer.killed = true;
         },
       };
-      (manager as any).browser = {
+      (manager as unknown as BrowserManagerHarness).browser = {
         disconnect: async () => {
           throw new Error('disconnect failed');
         },
+        isConnected: () => true,
       };
-      (manager as any).browserProcess = killer;
-      (manager as any).autoLaunched = true;
+      (manager as unknown as BrowserManagerHarness).browserProcess = killer;
+      (manager as unknown as BrowserManagerHarness).autoLaunched = true;
 
       await manager.close();
-      assert.strictEqual((manager as any).browser, null);
-      assert.strictEqual((manager as any).currentPage, null);
-      assert.strictEqual((manager as any).autoLaunched, false);
+      assert.strictEqual((manager as unknown as BrowserManagerHarness).browser, null);
+      assert.strictEqual((manager as unknown as BrowserManagerHarness).currentPage, null);
+      assert.strictEqual((manager as unknown as BrowserManagerHarness).autoLaunched, false);
       assert.strictEqual(killer.killed, true);
     } finally {
       setGlobal('navigator', backup.navigator);

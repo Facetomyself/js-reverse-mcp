@@ -1,13 +1,25 @@
 /**
- * Unit tests for AIService
- * Tests provider initialization, chat method, and error handling with retry mechanism
- * 
- * Requirements: 4.1, 12.2
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
  */
-
-import { describe, it, mock, beforeEach } from 'node:test';
 import assert from 'node:assert';
-import { AIService, type AIProvider, type AIMessage, type AIResponse } from '../../../src/services/AIService.js';
+import { describe, it } from 'node:test';
+
+import { AIService, type AIProvider, type AIMessage, type ChatOptions } from '../../../src/services/AIService.js';
+
+type RetryableError = Error & {
+  code?: 'ECONNRESET' | 'ETIMEDOUT' | 'ENOTFOUND';
+  status?: number;
+  statusCode?: number;
+};
+
+function createRetryableError(
+  message: string,
+  fields: Partial<Pick<RetryableError, 'code' | 'status' | 'statusCode'>>,
+): RetryableError {
+  return Object.assign(new Error(message), fields);
+}
 
 describe('AIService', () => {
   describe('Constructor', () => {
@@ -85,10 +97,10 @@ describe('AIService', () => {
     });
 
     it('should pass chat options to provider', async () => {
-      let calledOptions: any;
+      let calledOptions: ChatOptions | undefined;
       
       const mockProvider: AIProvider = {
-        chat: async (messages: AIMessage[], options?: any) => {
+        chat: async (messages: AIMessage[], options?: ChatOptions) => {
           calledOptions = options;
           return { content: 'test' };
         },
@@ -213,8 +225,9 @@ describe('AIService', () => {
         chat: async () => {
           attempts++;
           if (attempts < 3) {
-            const error: any = new Error('Connection reset');
-            error.code = 'ECONNRESET';
+            const error = createRetryableError('Connection reset', {
+              code: 'ECONNRESET',
+            });
             throw error;
           }
           return { content: 'Success after retries' };
@@ -242,8 +255,9 @@ describe('AIService', () => {
         chat: async () => {
           attempts++;
           if (attempts < 2) {
-            const error: any = new Error('Connection timed out');
-            error.code = 'ETIMEDOUT';
+            const error = createRetryableError('Connection timed out', {
+              code: 'ETIMEDOUT',
+            });
             throw error;
           }
           return { content: 'Success' };
@@ -269,8 +283,9 @@ describe('AIService', () => {
         chat: async () => {
           attempts++;
           if (attempts < 2) {
-            const error: any = new Error('Host not found');
-            error.code = 'ENOTFOUND';
+            const error = createRetryableError('Host not found', {
+              code: 'ENOTFOUND',
+            });
             throw error;
           }
           return { content: 'Success' };
@@ -295,8 +310,9 @@ describe('AIService', () => {
         chat: async () => {
           attempts++;
           if (attempts < 2) {
-            const error: any = new Error('Rate limit exceeded');
-            error.status = 429;
+            const error = createRetryableError('Rate limit exceeded', {
+              status: 429,
+            });
             throw error;
           }
           return { content: 'Success' };
@@ -321,8 +337,9 @@ describe('AIService', () => {
         chat: async () => {
           attempts++;
           if (attempts < 2) {
-            const error: any = new Error('Internal server error');
-            error.status = 500;
+            const error = createRetryableError('Internal server error', {
+              status: 500,
+            });
             throw error;
           }
           return { content: 'Success' };
@@ -347,8 +364,9 @@ describe('AIService', () => {
         chat: async () => {
           attempts++;
           if (attempts < 2) {
-            const error: any = new Error('Service unavailable');
-            error.statusCode = 503;
+            const error = createRetryableError('Service unavailable', {
+              statusCode: 503,
+            });
             throw error;
           }
           return { content: 'Success' };
@@ -372,8 +390,9 @@ describe('AIService', () => {
       const mockProvider: AIProvider = {
         chat: async () => {
           attempts++;
-          const error: any = new Error('Bad request');
-          error.status = 400;
+          const error = createRetryableError('Bad request', {
+            status: 400,
+          });
           throw error;
         },
         analyzeImage: async () => 'test',
@@ -402,8 +421,9 @@ describe('AIService', () => {
       const mockProvider: AIProvider = {
         chat: async () => {
           attempts++;
-          const error: any = new Error('Unauthorized');
-          error.status = 401;
+          const error = createRetryableError('Unauthorized', {
+            status: 401,
+          });
           throw error;
         },
         analyzeImage: async () => 'test',
@@ -432,8 +452,9 @@ describe('AIService', () => {
       const mockProvider: AIProvider = {
         chat: async () => {
           attempts++;
-          const error: any = new Error('Connection reset');
-          error.code = 'ECONNRESET';
+          const error = createRetryableError('Connection reset', {
+            code: 'ECONNRESET',
+          });
           throw error;
         },
         analyzeImage: async () => 'test',
@@ -472,8 +493,9 @@ describe('AIService', () => {
           lastTime = currentTime;
           
           if (attempts < 4) {
-            const error: any = new Error('Connection reset');
-            error.code = 'ECONNRESET';
+            const error = createRetryableError('Connection reset', {
+              code: 'ECONNRESET',
+            });
             throw error;
           }
           return { content: 'Success' };
@@ -512,8 +534,9 @@ describe('AIService', () => {
           lastTime = currentTime;
           
           if (attempts < 5) {
-            const error: any = new Error('Connection reset');
-            error.code = 'ECONNRESET';
+            const error = createRetryableError('Connection reset', {
+              code: 'ECONNRESET',
+            });
             throw error;
           }
           return { content: 'Success' };
@@ -544,8 +567,9 @@ describe('AIService', () => {
         analyzeImage: async () => {
           attempts++;
           if (attempts < 2) {
-            const error: any = new Error('Connection reset');
-            error.code = 'ECONNRESET';
+            const error = createRetryableError('Connection reset', {
+              code: 'ECONNRESET',
+            });
             throw error;
           }
           return 'Image analysis result';
@@ -570,8 +594,9 @@ describe('AIService', () => {
         chat: async () => ({ content: 'test' }),
         analyzeImage: async () => {
           attempts++;
-          const error: any = new Error('Invalid image format');
-          error.status = 400;
+          const error = createRetryableError('Invalid image format', {
+            status: 400,
+          });
           throw error;
         },
       };

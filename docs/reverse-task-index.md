@@ -2,6 +2,14 @@
 
 按逆向目标快速定位 MCP 工具，减少“该用哪个工具”的试错成本。
 
+默认工作流：
+
+1. 页面观察
+2. 运行时采样
+3. task artifact 记录
+4. local rebuild
+5. 本地补环境
+
 ## 1) 快速摸清页面加载了什么脚本
 
 - `list_scripts`
@@ -29,6 +37,10 @@
 
 推荐先 Hook `fetch/xhr/websocket`，触发业务动作后再抓记录。
 
+同步记录：
+
+- `record_reverse_evidence`
+
 ## 4) 一键分析目标站点（推荐入口）
 
 - `analyze_target`
@@ -42,7 +54,14 @@
 
 适合第一次接触目标站，快速得到下一步可执行动作。
 
-## 5) 评估风险和加密实现
+## 5) 导出本地补环境工程
+
+- `export_rebuild_bundle`
+- `diff_env_requirements`
+
+适合在页面里确认请求链路后，导出 `env/entry.js`、`env/env.js`、`env/polyfills.js`、`env/capture.json` 做 local rebuild。
+
+## 6) 评估风险和加密实现
 
 - `detect_crypto`
 - `risk_panel`
@@ -50,7 +69,7 @@
 
 用于识别弱算法、可疑签名实现、安全风险点。
 
-## 6) 页面交互自动化（配合采样）
+## 7) 页面交互自动化（配合采样）
 
 - `navigate_page`
 - `query_dom`
@@ -61,14 +80,15 @@
 
 适合自动触发登录、下单、提交等关键动作后再采集数据。
 
-## 7) 导出分析结果
+## 8) 导出分析结果
 
 - `export_session_report`
 - `collection_diff`
+- `record_reverse_evidence`
 
-用于沉淀会话证据、对比两次采样差异。
+用于沉淀会话证据、对比两次采样差异，并把关键结论写入 task artifact。
 
-## 8) 登录态复用（需登录站点建议）
+## 9) 登录态复用（需登录站点建议）
 
 - `save_session_state`
 - `restore_session_state`
@@ -79,17 +99,20 @@
 
 适合“必须登录后才能访问”的目标站，减少重复扫码/验证码成本。
 
-## 9) 典型最小链路
+## 10) 典型最小链路
 
 1. `new_page`
 2. `analyze_target`
-3. `search_in_scripts`
-4. `create_hook` + `inject_hook`
-5. 触发页面动作
-6. `get_hook_data`
-7. `risk_panel`
-8. `export_session_report`
+3. 设定目标边界：`targetKeywords`、`targetUrlPatterns`、`targetFunctionNames`、`targetActionDescription`
+4. `search_in_scripts`
+5. `create_hook` + `inject_hook`
+6. 触发页面动作
+7. `get_hook_data`
+8. `record_reverse_evidence`
+9. `export_rebuild_bundle`
+10. `diff_env_requirements`
+11. `risk_panel`
 
-## 10) 参数总表
+## 11) 参数总表
 
 完整参数与字段说明请查：`docs/tool-reference.md`

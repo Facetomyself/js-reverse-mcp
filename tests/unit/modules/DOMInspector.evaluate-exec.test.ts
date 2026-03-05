@@ -1,11 +1,30 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import { DOMInspector } from '../../../src/modules/collector/DOMInspector.js';
 
-type FakeAttr = { name: string; value: string };
-type FakeRect = { x: number; y: number; width: number; height: number; top: number; left: number; right: number; bottom: number };
+interface FakeAttr {
+  name: string;
+  value: string;
+}
 
-type FakeElement = {
+interface FakeRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  top: number;
+  left: number;
+  right: number;
+  bottom: number;
+}
+
+interface FakeElement {
   tagName: string;
   nodeName: string;
   id: string;
@@ -18,7 +37,79 @@ type FakeElement = {
   parentElement?: FakeElement;
   parentNode?: { children: FakeElement[] };
   getBoundingClientRect: () => FakeRect;
-};
+}
+
+interface ComputedStyleStub {
+  display: string;
+  visibility: string;
+  opacity: string;
+  position: string;
+  'z-index': string;
+  width: string;
+  height: string;
+  top: string;
+  left: string;
+  right: string;
+  bottom: string;
+  color: string;
+  'background-color': string;
+  'font-size': string;
+  'font-family': string;
+  border: string;
+  padding: string;
+  margin: string;
+  overflow: string;
+  getPropertyValue(prop: string): string;
+}
+
+interface XPathSnapshot {
+  snapshotLength: number;
+  snapshotItem(index: number): FakeElement | null;
+}
+
+interface DocumentStub {
+  body: FakeElement;
+  documentElement: { clientHeight: number; clientWidth: number };
+  querySelector(sel: string): FakeElement | null;
+  querySelectorAll(sel: string): FakeElement[];
+  evaluate(xpath: string): XPathSnapshot;
+}
+
+interface MutationObserverRecordStub {
+  type: string;
+  target: FakeElement | null;
+  addedNodes: { length: number };
+  removedNodes: { length: number };
+  attributeName?: string;
+}
+
+interface MutationObserverLike {
+  observe(): void;
+  disconnect(): void;
+}
+
+type MutationObserverConstructor = new (
+  callback: (records: MutationObserverRecordStub[]) => void,
+) => MutationObserverLike;
+
+interface WindowStub {
+  innerHeight: number;
+  innerWidth: number;
+  __domObserver?: MutationObserverLike;
+  getComputedStyle(): ComputedStyleStub;
+}
+
+interface GlobalDomHarness {
+  document?: DocumentStub;
+  window?: WindowStub;
+  MutationObserver?: MutationObserverConstructor;
+  XPathResult?: { ORDERED_NODE_SNAPSHOT_TYPE: number };
+}
+
+interface EvaluatePage {
+  evaluate<T, Args extends unknown[]>(fn: (...args: Args) => T, ...args: Args): Promise<T>;
+  waitForSelector(selector: string, options: { timeout: number }): Promise<void>;
+}
 
 function makeRect(width = 100, height = 30): FakeRect {
   return { x: 10, y: 20, width, height, top: 20, left: 10, right: 10 + width, bottom: 20 + height };
@@ -84,7 +175,7 @@ function setupFakeDOM() {
     'a[href]': [link],
   };
 
-  const computed = {
+  const computed: ComputedStyleStub = {
     display: 'block',
     visibility: 'visible',
     opacity: '1',
@@ -105,13 +196,14 @@ function setupFakeDOM() {
     margin: '0',
     overflow: 'visible',
     getPropertyValue(prop: string) {
-      return (this as any)[prop] ?? '';
+      const value = this[prop as keyof ComputedStyleStub];
+      return typeof value === 'string' ? value : '';
     },
   };
 
   const evaluateResultElements = [span];
 
-  const documentStub: any = {
+  const documentStub: DocumentStub = {
     body,
     documentElement: { clientHeight: 800, clientWidth: 1200 },
     querySelector(sel: string) {
@@ -130,10 +222,10 @@ function setupFakeDOM() {
     },
   };
 
-  class MutationObserverStub {
-    callback: any;
+  class MutationObserverStub implements MutationObserverLike {
+    callback: (records: MutationObserverRecordStub[]) => void;
     observed = false;
-    constructor(cb: any) {
+    constructor(cb: (records: MutationObserverRecordStub[]) => void) {
       this.callback = cb;
     }
     observe() {
@@ -144,7 +236,7 @@ function setupFakeDOM() {
     }
   }
 
-  const windowStub: any = {
+  const windowStub: WindowStub = {
     innerHeight: 800,
     innerWidth: 1200,
     getComputedStyle() {
@@ -161,26 +253,29 @@ function setupFakeDOM() {
 
 describe('DOMInspector evaluate execution', () => {
   it('executes browser callbacks to cover DOM logic', async () => {
+    const globals = globalThis as unknown as GlobalDomHarness;
     const originals = {
-      document: (globalThis as any).document,
-      window: (globalThis as any).window,
-      MutationObserver: (globalThis as any).MutationObserver,
-      XPathResult: (globalThis as any).XPathResult,
+      document: globals.document,
+      window: globals.window,
+      MutationObserver: globals.MutationObserver,
+      XPathResult: globals.XPathResult,
     };
 
     const { documentStub, windowStub, MutationObserverStub } = setupFakeDOM();
-    (globalThis as any).document = documentStub;
-    (globalThis as any).window = windowStub;
-    (globalThis as any).MutationObserver = MutationObserverStub;
-    (globalThis as any).XPathResult = { ORDERED_NODE_SNAPSHOT_TYPE: 7 };
+    globals.document = documentStub;
+    globals.window = windowStub;
+    globals.MutationObserver = MutationObserverStub;
+    globals.XPathResult = { ORDERED_NODE_SNAPSHOT_TYPE: 7 };
 
     try {
-      const page = {
-        evaluate: async (fn: (...args: any[]) => any, ...args: any[]) => fn(...args),
-        waitForSelector: async () => {},
+      const page: EvaluatePage = {
+        evaluate: async <T, Args extends unknown[]>(fn: (...args: Args) => T, ...args: Args) => fn(...args),
+        waitForSelector: async () => undefined,
       };
 
-      const inspector = new DOMInspector({ getActivePage: async () => page } as any);
+      const inspector = new DOMInspector(
+        { getActivePage: async () => page } as unknown as ConstructorParameters<typeof DOMInspector>[0],
+      );
 
       const one = await inspector.querySelector('#submit');
       assert.strictEqual(one.found, true);
@@ -213,15 +308,15 @@ describe('DOMInspector evaluate execution', () => {
       assert.strictEqual(viewport, true);
 
       await inspector.observeDOMChanges({ selector: '#root', subtree: true });
-      assert.ok((globalThis as any).window.__domObserver);
+      assert.ok(globals.window?.__domObserver);
 
       await inspector.stopObservingDOM();
-      assert.strictEqual((globalThis as any).window.__domObserver, undefined);
+      assert.strictEqual(globals.window?.__domObserver, undefined);
     } finally {
-      (globalThis as any).document = originals.document;
-      (globalThis as any).window = originals.window;
-      (globalThis as any).MutationObserver = originals.MutationObserver;
-      (globalThis as any).XPathResult = originals.XPathResult;
+      globals.document = originals.document;
+      globals.window = originals.window;
+      globals.MutationObserver = originals.MutationObserver;
+      globals.XPathResult = originals.XPathResult;
     }
   });
 });

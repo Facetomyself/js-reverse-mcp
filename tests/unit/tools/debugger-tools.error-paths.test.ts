@@ -1,5 +1,11 @@
-import {describe, it} from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import {describe, it} from 'node:test';
+
 import {
   breakOnXhr,
   evaluateOnCallframe,
@@ -29,31 +35,86 @@ import {
   getStorage,
 } from '../../../src/tools/debugger.js';
 
-function makeResponse() {
+interface DebuggerResponseHarness {
+  lines: string[];
+  appendResponseLine(value: string): void;
+  setIncludePages(value: boolean): void;
+  setIncludeNetworkRequests(value: boolean): void;
+  setIncludeConsoleData(value: boolean): void;
+  attachImage(value: unknown): void;
+  attachNetworkRequest(id: number): void;
+  attachConsoleMessage(id: number): void;
+  setIncludeWebSocketConnections(value: boolean): void;
+  attachWebSocket(id: number): void;
+}
+
+interface PausedStateHarness {
+  isPaused: boolean;
+  callFrames: Array<{
+    callFrameId: string;
+    location: {
+      scriptId: string;
+      lineNumber: number;
+      columnNumber: number;
+    };
+  }>;
+}
+
+interface DebuggerContextHarness {
+  isEnabled(): boolean;
+  getPausedState?(): PausedStateHarness;
+  evaluateOnCallFrame?(callFrameId: string, expression: string): Promise<{
+    exceptionDetails?: {
+      text: string;
+      exception?: {description?: string};
+    };
+    result?: unknown;
+  }>;
+  getClient?(): object | null;
+}
+
+interface ToolContextHarness {
+  debuggerContext: DebuggerContextHarness;
+  getSelectedPage(): {
+    evaluate(script: string): Promise<unknown>;
+  };
+  getSelectedFrame(): {
+    evaluate(script: string): Promise<unknown>;
+  };
+  getNetworkRequestById(): {url(): string};
+  getRequestInitiator(): unknown;
+}
+
+interface EmptyRequestHarness {
+  params: Record<string, never>;
+}
+
+function makeResponse(): DebuggerResponseHarness {
   const lines: string[] = [];
   return {
     lines,
     appendResponseLine: (v: string) => lines.push(v),
-    setIncludePages: () => {},
-    setIncludeNetworkRequests: () => {},
-    setIncludeConsoleData: () => {},
-    attachImage: () => {},
-    attachNetworkRequest: () => {},
-    attachConsoleMessage: () => {},
-    setIncludeWebSocketConnections: () => {},
-    attachWebSocket: () => {},
+    setIncludePages: () => undefined,
+    setIncludeNetworkRequests: () => undefined,
+    setIncludeConsoleData: () => undefined,
+    attachImage: () => undefined,
+    attachNetworkRequest: () => undefined,
+    attachConsoleMessage: () => undefined,
+    setIncludeWebSocketConnections: () => undefined,
+    attachWebSocket: () => undefined,
   };
 }
 
-function makeDisabledContext() {
+function makeDisabledContext(): ToolContextHarness {
   return {
     debuggerContext: {
       isEnabled: () => false,
     },
     getSelectedPage: () => ({evaluate: async () => ({})}),
+    getSelectedFrame: () => ({evaluate: async () => ({})}),
     getNetworkRequestById: () => ({url: () => 'https://example.com'}),
     getRequestInitiator: () => undefined,
-  } as any;
+  };
 }
 
 describe('debugger tools error paths', () => {
@@ -61,31 +122,55 @@ describe('debugger tools error paths', () => {
     const response = makeResponse();
     const context = makeDisabledContext();
 
-    await listScripts.handler({params: {}} as any, response as any, context);
-    await getScriptSource.handler({params: {scriptId: '1'}} as any, response as any, context);
-    await findInScript.handler({params: {scriptId: '1', query: 'x'}} as any, response as any, context);
-    await searchInSources.handler({params: {query: 'x'}} as any, response as any, context);
-    await setBreakpoint.handler({params: {url: 'a.js', lineNumber: 1}} as any, response as any, context);
-    await removeBreakpoint.handler({params: {breakpointId: 'bp'}} as any, response as any, context);
-    await listBreakpoints.handler({params: {}} as any, response as any, context);
-    await getPausedInfo.handler({params: {}} as any, response as any, context);
-    await resume.handler({params: {}} as any, response as any, context);
-    await pause.handler({params: {}} as any, response as any, context);
-    await stepOver.handler({params: {}} as any, response as any, context);
-    await stepInto.handler({params: {}} as any, response as any, context);
-    await stepOut.handler({params: {}} as any, response as any, context);
-    await evaluateOnCallframe.handler({params: {expression: 'x', frameIndex: 0}} as any, response as any, context);
-    await setBreakpointOnText.handler({params: {text: 'token'}} as any, response as any, context);
-    await breakOnXhr.handler({params: {url: '/api'}} as any, response as any, context);
-    await removeXhrBreakpoint.handler({params: {url: '/api'}} as any, response as any, context);
-    await traceFunction.handler({params: {functionName: 'sign'}} as any, response as any, context);
+    await listScripts.handler({params: {}} as EmptyRequestHarness, response as unknown as Parameters<typeof listScripts.handler>[1], context as unknown as Parameters<typeof listScripts.handler>[2]);
+    await getScriptSource.handler({params: {scriptId: '1', length: 1000}}, response as unknown as Parameters<typeof getScriptSource.handler>[1], context as unknown as Parameters<typeof getScriptSource.handler>[2]);
+    await findInScript.handler({params: {scriptId: '1', query: 'x', contextChars: 100, occurrence: 1, caseSensitive: true}}, response as unknown as Parameters<typeof findInScript.handler>[1], context as unknown as Parameters<typeof findInScript.handler>[2]);
+    await searchInSources.handler({params: {query: 'x', caseSensitive: false, isRegex: false, maxResults: 30, maxLineLength: 150, excludeMinified: true}}, response as unknown as Parameters<typeof searchInSources.handler>[1], context as unknown as Parameters<typeof searchInSources.handler>[2]);
+    await setBreakpoint.handler({params: {url: 'a.js', lineNumber: 1, columnNumber: 0, isRegex: false}}, response as unknown as Parameters<typeof setBreakpoint.handler>[1], context as unknown as Parameters<typeof setBreakpoint.handler>[2]);
+    await removeBreakpoint.handler({params: {breakpointId: 'bp'}}, response as unknown as Parameters<typeof removeBreakpoint.handler>[1], context as unknown as Parameters<typeof removeBreakpoint.handler>[2]);
+    await listBreakpoints.handler({params: {}} as EmptyRequestHarness, response as unknown as Parameters<typeof listBreakpoints.handler>[1], context as unknown as Parameters<typeof listBreakpoints.handler>[2]);
+    await getPausedInfo.handler({params: {includeScopes: false, maxScopeDepth: 3}}, response as unknown as Parameters<typeof getPausedInfo.handler>[1], context as unknown as Parameters<typeof getPausedInfo.handler>[2]);
+    await resume.handler({params: {}} as EmptyRequestHarness, response as unknown as Parameters<typeof resume.handler>[1], context as unknown as Parameters<typeof resume.handler>[2]);
+    await pause.handler({params: {}} as EmptyRequestHarness, response as unknown as Parameters<typeof pause.handler>[1], context as unknown as Parameters<typeof pause.handler>[2]);
+    await stepOver.handler({params: {}} as EmptyRequestHarness, response as unknown as Parameters<typeof stepOver.handler>[1], context as unknown as Parameters<typeof stepOver.handler>[2]);
+    await stepInto.handler({params: {}} as EmptyRequestHarness, response as unknown as Parameters<typeof stepInto.handler>[1], context as unknown as Parameters<typeof stepInto.handler>[2]);
+    await stepOut.handler({params: {}} as EmptyRequestHarness, response as unknown as Parameters<typeof stepOut.handler>[1], context as unknown as Parameters<typeof stepOut.handler>[2]);
+    await evaluateOnCallframe.handler({params: {expression: 'x', frameIndex: 0}}, response as unknown as Parameters<typeof evaluateOnCallframe.handler>[1], context as unknown as Parameters<typeof evaluateOnCallframe.handler>[2]);
+    await setBreakpointOnText.handler({params: {text: 'token', occurrence: 1}}, response as unknown as Parameters<typeof setBreakpointOnText.handler>[1], context as unknown as Parameters<typeof setBreakpointOnText.handler>[2]);
+    await breakOnXhr.handler({params: {url: '/api'}}, response as unknown as Parameters<typeof breakOnXhr.handler>[1], context as unknown as Parameters<typeof breakOnXhr.handler>[2]);
+    await removeXhrBreakpoint.handler({params: {url: '/api'}}, response as unknown as Parameters<typeof removeXhrBreakpoint.handler>[1], context as unknown as Parameters<typeof removeXhrBreakpoint.handler>[2]);
+    await traceFunction.handler({params: {functionName: 'sign', pause: false, logArgs: true, logThis: false}}, response as unknown as Parameters<typeof traceFunction.handler>[1], context as unknown as Parameters<typeof traceFunction.handler>[2]);
 
     assert.ok(response.lines.filter((line) => line.includes('Debugger is not enabled')).length >= 10);
   });
 
   it('covers runtime error and failure response branches', async () => {
     const response = makeResponse();
-    const context = {
+    const evaluateReverseScript = async (script: string) => {
+      if (script.includes('__mcp_hooks__') && script.includes('return [];')) {
+        throw new Error('list hook fail');
+      }
+      if (script.includes('hookId') && script.includes('Hook already exists')) {
+        return {success: false, message: 'Hook already exists with id: h1'};
+      }
+      if (script.includes('Hook not found')) {
+        return {success: false, message: 'Hook not found: missing'};
+      }
+      if (script.includes('Cannot evaluate')) {
+        return {error: 'Cannot evaluate: x'};
+      }
+      if (script.includes('Monitor already exists')) {
+        return {success: false, message: 'Monitor already exists: m1'};
+      }
+      if (script.includes('Monitor not found')) {
+        return {success: false, message: 'Monitor not found: m1'};
+      }
+      if (script.includes('const type =')) {
+        throw new Error('storage fail');
+      }
+      return {};
+    };
+    const context: ToolContextHarness = {
       debuggerContext: {
         isEnabled: () => true,
         getPausedState: () => ({
@@ -101,49 +186,29 @@ describe('debugger tools error paths', () => {
         getClient: () => null,
       },
       getSelectedPage: () => ({
-        evaluate: async (script: string) => {
-          if (script.includes('__mcp_hooks__') && script.includes('return [];')) {
-            throw new Error('list hook fail');
-          }
-          if (script.includes('hookId') && script.includes('Hook already exists')) {
-            return {success: false, message: 'Hook already exists with id: h1'};
-          }
-          if (script.includes('Hook not found')) {
-            return {success: false, message: 'Hook not found: missing'};
-          }
-          if (script.includes('Cannot evaluate')) {
-            return {error: 'Cannot evaluate: x'};
-          }
-          if (script.includes('Monitor already exists')) {
-            return {success: false, message: 'Monitor already exists: m1'};
-          }
-          if (script.includes('Monitor not found')) {
-            return {success: false, message: 'Monitor not found: m1'};
-          }
-          if (script.includes('const type =')) {
-            throw new Error('storage fail');
-          }
-          return {};
-        },
+        evaluate: evaluateReverseScript,
+      }),
+      getSelectedFrame: () => ({
+        evaluate: evaluateReverseScript,
       }),
       getNetworkRequestById: () => {
         throw new Error('request missing');
       },
       getRequestInitiator: () => undefined,
-    } as any;
+    };
 
-    await getRequestInitiator.handler({params: {requestId: 1}} as any, response as any, context);
-    await hookFunction.handler({params: {target: 'window.fetch', hookId: 'h1'}} as any, response as any, context);
-    await unhookFunction.handler({params: {hookId: 'missing'}} as any, response as any, context);
+    await getRequestInitiator.handler({params: {requestId: 1}}, response as unknown as Parameters<typeof getRequestInitiator.handler>[1], context as unknown as Parameters<typeof getRequestInitiator.handler>[2]);
+    await hookFunction.handler({params: {target: 'window.fetch', hookId: 'h1', logArgs: true, logResult: true, logStack: false}}, response as unknown as Parameters<typeof hookFunction.handler>[1], context as unknown as Parameters<typeof hookFunction.handler>[2]);
+    await unhookFunction.handler({params: {hookId: 'missing'}}, response as unknown as Parameters<typeof unhookFunction.handler>[1], context as unknown as Parameters<typeof unhookFunction.handler>[2]);
     await assert.doesNotReject(async () => {
-      await listHooks.handler({params: {}} as any, response as any, context);
+      await listHooks.handler({params: {}} as EmptyRequestHarness, response as unknown as Parameters<typeof listHooks.handler>[1], context as unknown as Parameters<typeof listHooks.handler>[2]);
     });
-    await inspectObject.handler({params: {expression: 'window.__not_found__'}} as any, response as any, context);
-    await getStorage.handler({params: {type: 'all'}} as any, response as any, context);
-    await monitorEvents.handler({params: {selector: '#missing', monitorId: 'm1'}} as any, response as any, context);
-    await stopMonitor.handler({params: {monitorId: 'm1'}} as any, response as any, context);
-    await breakOnXhr.handler({params: {url: '/api'}} as any, response as any, context);
-    await removeXhrBreakpoint.handler({params: {url: '/api'}} as any, response as any, context);
+    await inspectObject.handler({params: {expression: 'window.__not_found__', depth: 2, showMethods: false, showPrototype: false}}, response as unknown as Parameters<typeof inspectObject.handler>[1], context as unknown as Parameters<typeof inspectObject.handler>[2]);
+    await getStorage.handler({params: {type: 'all'}}, response as unknown as Parameters<typeof getStorage.handler>[1], context as unknown as Parameters<typeof getStorage.handler>[2]);
+    await monitorEvents.handler({params: {selector: '#missing', monitorId: 'm1'}}, response as unknown as Parameters<typeof monitorEvents.handler>[1], context as unknown as Parameters<typeof monitorEvents.handler>[2]);
+    await stopMonitor.handler({params: {monitorId: 'm1'}}, response as unknown as Parameters<typeof stopMonitor.handler>[1], context as unknown as Parameters<typeof stopMonitor.handler>[2]);
+    await breakOnXhr.handler({params: {url: '/api'}}, response as unknown as Parameters<typeof breakOnXhr.handler>[1], context as unknown as Parameters<typeof breakOnXhr.handler>[2]);
+    await removeXhrBreakpoint.handler({params: {url: '/api'}}, response as unknown as Parameters<typeof removeXhrBreakpoint.handler>[1], context as unknown as Parameters<typeof removeXhrBreakpoint.handler>[2]);
 
     assert.ok(response.lines.some((line) => line.includes('Error getting initiator')));
     assert.ok(response.lines.some((line) => line.includes('Hook already exists')));

@@ -1,10 +1,36 @@
-import { describe, it, beforeEach } from 'node:test';
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it, beforeEach } from 'node:test';
+
 import { UnifiedCacheManager } from '../../../src/utils/UnifiedCacheManager.js';
+
+interface ResettableUnifiedCacheManager {
+  instance?: unknown;
+}
+
+interface ExtendedUnifiedCacheManager {
+  cleanupLowHitRate(): Promise<void>;
+  cleanupLargeItems(): Promise<void>;
+  cleanupExpired(): Promise<void>;
+  GLOBAL_MAX_SIZE: number;
+  registerCache(cache: {
+    name: string;
+    getStats(): {entries: number; size: number; hits?: number; misses?: number; hitRate?: number};
+    cleanup?(): void | Promise<void>;
+    clear?(): void | Promise<void>;
+  }): void;
+  unregisterCache(name: string): void;
+  getGlobalStats(): Promise<{recommendations: string[]}>;
+}
 
 describe('UnifiedCacheManager extended', () => {
   beforeEach(() => {
-    (UnifiedCacheManager as any).instance = undefined;
+    (UnifiedCacheManager as unknown as ResettableUnifiedCacheManager).instance = undefined;
   });
 
   it('continues when a cache getStats throws', async () => {
@@ -32,8 +58,8 @@ describe('UnifiedCacheManager extended', () => {
     manager.registerCache({
       name: 'small',
       getStats: () => ({ entries: 1, size: 1000, hits: 1, misses: 0, hitRate: 1 }),
-      cleanup: () => {},
-      clear: () => {},
+      cleanup: () => undefined,
+      clear: () => undefined,
     });
 
     const result = await manager.smartCleanup(2000);
@@ -62,10 +88,10 @@ describe('UnifiedCacheManager extended', () => {
       },
     });
 
-    await (manager as any).cleanupLowHitRate();
+    await (manager as unknown as ExtendedUnifiedCacheManager).cleanupLowHitRate();
     assert.ok(lowCleared >= 1);
 
-    await (manager as any).cleanupLargeItems();
+    await (manager as unknown as ExtendedUnifiedCacheManager).cleanupLargeItems();
     assert.ok(lowCleared + highCleared >= 1);
 
     manager.unregisterCache('low-hit');
@@ -87,7 +113,7 @@ describe('UnifiedCacheManager extended', () => {
       },
     });
 
-    await (manager as any).cleanupExpired();
+    await (manager as unknown as ExtendedUnifiedCacheManager).cleanupExpired();
     await manager.clearAll();
     await manager.preheat(['https://a.example', 'https://b.example']);
 
@@ -97,19 +123,19 @@ describe('UnifiedCacheManager extended', () => {
   });
 
   it('generates recommendations for critical size and cache-specific issues', async () => {
-    const manager = UnifiedCacheManager.getInstance() as any;
+    const manager = UnifiedCacheManager.getInstance() as unknown as ExtendedUnifiedCacheManager;
     manager.GLOBAL_MAX_SIZE = 1000;
 
     manager.registerCache({
       name: 'big-low-hit',
       getStats: () => ({ entries: 10, size: 950, hits: 1, misses: 99, hitRate: 0.01 }),
-      clear: () => {},
+      clear: () => undefined,
     });
 
     manager.registerCache({
       name: 'small-good-hit',
       getStats: () => ({ entries: 1, size: 10, hits: 9, misses: 1, hitRate: 0.9 }),
-      clear: () => {},
+      clear: () => undefined,
     });
 
     const stats = await manager.getGlobalStats();
@@ -123,12 +149,12 @@ describe('UnifiedCacheManager extended', () => {
   });
 
   it('generates good-health recommendation when usage is low and hit rate is high', async () => {
-    const manager = UnifiedCacheManager.getInstance() as any;
+    const manager = UnifiedCacheManager.getInstance() as unknown as ExtendedUnifiedCacheManager;
     manager.GLOBAL_MAX_SIZE = 1000;
     manager.registerCache({
       name: 'healthy',
       getStats: () => ({ entries: 1, size: 50, hits: 8, misses: 2, hitRate: 0.8 }),
-      clear: () => {},
+      clear: () => undefined,
     });
 
     const stats = await manager.getGlobalStats();

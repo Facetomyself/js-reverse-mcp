@@ -7,7 +7,7 @@
 import './polyfill.js';
 
 import type {Channel} from './browser.js';
-import {ensureBrowserConnected, ensureBrowserLaunched} from './browser.js';
+import {ensureBrowserConnected, ensureBrowserLaunched, resolveAutoConnectTarget} from './browser.js';
 import {parseArguments} from './cli.js';
 import {features} from './features.js';
 import {loadIssueDescriptions} from './issue-descriptions.js';
@@ -20,25 +20,28 @@ import {
   type CallToolResult,
   SetLevelRequestSchema,
 } from './third_party/index.js';
+import * as jshookAnalyzerTools from './tools/analyzer.js';
 import {ToolCategory} from './tools/categories.js';
+import * as jshookCollectorTools from './tools/collector.js';
 import * as consoleTools from './tools/console.js';
 import * as debuggerTools from './tools/debugger.js';
+import * as jshookDomTools from './tools/dom.js';
+import * as jshookHookTools from './tools/hook.js';
+import * as frameTools from './tools/frames.js';
 import * as networkTools from './tools/network.js';
+import * as jshookPageTools from './tools/page.js';
 import * as pagesTools from './tools/pages.js';
+import * as jshookRebuildTools from './tools/rebuild.js';
 import * as screenshotTools from './tools/screenshot.js';
 import * as scriptTools from './tools/script.js';
-import {ToolRegistry} from './tools/ToolRegistry.js';
-import type {ToolDefinition} from './tools/ToolDefinition.js';
-import * as jshookCollectorTools from './tools/collector.js';
-import * as jshookAnalyzerTools from './tools/analyzer.js';
-import * as jshookHookTools from './tools/hook.js';
 import * as jshookStealthTools from './tools/stealth.js';
-import * as jshookDomTools from './tools/dom.js';
-import * as jshookPageTools from './tools/page.js';
+import type {ToolDefinition} from './tools/ToolDefinition.js';
+import {ToolRegistry} from './tools/ToolRegistry.js';
 import * as websocketTools from './tools/websocket.js';
 import {ErrorCodes, formatError} from './utils/errors.js';
 import {TokenBudgetManager} from './utils/TokenBudgetManager.js';
 import {ToolExecutionScheduler} from './utils/ToolExecutionScheduler.js';
+import {getJSHookRuntime} from './tools/runtime.js';
 
 // If moved update release-please config
 // x-release-please-start-version
@@ -69,11 +72,15 @@ async function getContext(): Promise<McpContext> {
     extraArgs.push(`--proxy-server=${args.proxyServer}`);
   }
   const devtools = args.experimentalDevtools ?? false;
+  const autoConnectTarget =
+    !args.browserUrl && !args.wsEndpoint && args.autoConnect
+      ? await resolveAutoConnectTarget()
+      : undefined;
   const browser =
-    args.browserUrl || args.wsEndpoint
+    args.browserUrl || args.wsEndpoint || autoConnectTarget
       ? await ensureBrowserConnected({
-          browserURL: args.browserUrl,
-          wsEndpoint: args.wsEndpoint,
+          browserURL: args.browserUrl ?? autoConnectTarget?.browserURL,
+          wsEndpoint: args.wsEndpoint ?? autoConnectTarget?.wsEndpoint,
           wsHeaders: args.wsHeaders,
           devtools,
         })
@@ -157,6 +164,7 @@ function registerTool(tool: ToolDefinition): void {
           const context = await getContext();
           logToolEvent(traceId, tool.name, 'context_resolved');
           await context.detectOpenDevToolsWindows();
+          getJSHookRuntime().bindPageContext(() => context.getSelectedPage());
           const response = new McpResponse();
           await tool.handler(
             {
@@ -208,6 +216,7 @@ function asTools(module: object): ToolDefinition[] {
 const toolSources: Array<{source: string; tools: ToolDefinition[]}> = [
   {source: 'console', tools: asTools(consoleTools)},
   {source: 'debugger', tools: asTools(debuggerTools)},
+  {source: 'frames', tools: asTools(frameTools)},
   {source: 'network', tools: asTools(networkTools)},
   {source: 'pages', tools: asTools(pagesTools)},
   {source: 'screenshot', tools: asTools(screenshotTools)},
@@ -218,6 +227,7 @@ const toolSources: Array<{source: string; tools: ToolDefinition[]}> = [
   {source: 'jshookStealth', tools: asTools(jshookStealthTools)},
   {source: 'jshookDom', tools: asTools(jshookDomTools)},
   {source: 'jshookPage', tools: asTools(jshookPageTools)},
+  {source: 'jshookRebuild', tools: asTools(jshookRebuildTools)},
   {source: 'websocket', tools: asTools(websocketTools)},
 ];
 

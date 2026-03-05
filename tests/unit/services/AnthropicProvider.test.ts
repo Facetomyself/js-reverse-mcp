@@ -1,12 +1,11 @@
 /**
- * Unit tests for AnthropicProvider
- * Tests provider initialization, chat method, system message handling, and error handling
- * 
- * Requirements: 4.3, 12.2
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
  */
-
-import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import { AnthropicProvider } from '../../../src/services/AnthropicProvider.js';
 
 const runProviderTests = process.env.RUN_PROVIDER_TESTS === 'true';
@@ -399,7 +398,7 @@ describe('AnthropicProvider', {skip: !runProviderTests}, () => {
         async () => {
           await provider.chat([{ role: 'user', content: 'Hello' }]);
         },
-        (error: any) => {
+        (error: unknown) => {
           // Should be an Error object
           assert.ok(error instanceof Error);
           return true;
@@ -415,7 +414,7 @@ describe('AnthropicProvider', {skip: !runProviderTests}, () => {
       try {
         await provider.chat([{ role: 'user', content: 'Hello' }]);
         assert.fail('Should have thrown an error');
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Error should have status property for retry logic
         assert.ok(error instanceof Error);
       }

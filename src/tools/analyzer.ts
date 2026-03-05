@@ -1,8 +1,16 @@
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import {zod} from '../third_party/index.js';
-import {defineTool} from './ToolDefinition.js';
+import {TokenBudgetManager} from '../utils/TokenBudgetManager.js';
+
 import {ToolCategory} from './categories.js';
 import {getJSHookRuntime} from './runtime.js';
-import {TokenBudgetManager} from '../utils/TokenBudgetManager.js';
+import {defineTool} from './ToolDefinition.js';
+
 
 export const deobfuscateCode = defineTool({
   name: 'deobfuscate_code',
@@ -482,6 +490,38 @@ function buildActionPlan(result: {
   return steps;
 }
 
+function buildWhyTheseSteps(input: {
+  requestFingerprints: Array<{fingerprint: string}>;
+  candidateFunctions: string[];
+  hookRecordCount: number;
+}): string[] {
+  return [
+    input.requestFingerprints.length > 0
+      ? `Observed suspicious request fingerprints: ${input.requestFingerprints.slice(0, 2).map((item) => item.fingerprint).join('; ')}`
+      : 'No stable request fingerprint yet, so the next steps keep observation and capture lightweight.',
+    input.candidateFunctions.length > 0
+      ? `Candidate signing functions were found: ${input.candidateFunctions.slice(0, 3).join(', ')}`
+      : 'No obvious signing function names were found, so the workflow should rely on request and hook evidence first.',
+    input.hookRecordCount > 0
+      ? `Hook capture already produced ${input.hookRecordCount} runtime records, enough to start correlation and local rebuild.`
+      : 'Hook capture has not produced data yet, so the workflow should avoid premature local rebuild guesses.',
+  ];
+}
+
+function buildStopConditions(input: {
+  hookRecordCount: number;
+  suspiciousFlowCount: number;
+}): string[] {
+  return [
+    input.suspiciousFlowCount > 0
+      ? 'Stop broadening capture once the target request path is confirmed and export a rebuild bundle.'
+      : 'Stop and trigger the target action if no suspicious request path has been confirmed yet.',
+    input.hookRecordCount > 200
+      ? 'Stop expanding hooks until noisy capture is reduced with summary view or narrower targets.'
+      : 'Stop escalating to breakpoints unless hook evidence still cannot expose the required runtime context.',
+  ];
+}
+
 type AnalyzeTargetParams = zod.infer<zod.ZodObject<{
   url: zod.ZodString;
   topN: zod.ZodOptional<zod.ZodNumber>;
@@ -585,7 +625,7 @@ async function runAnalyzeTargetWorkflow(runtime: ReturnType<typeof getJSHookRunt
   const injectedHooks = await installAnalyzeHooks(runtime, hookPreset, autoInjectHooks);
 
   const replayResults = params.autoReplayActions?.length
-    ? await runtime.pageController.replayActions(params.autoReplayActions as any)
+    ? await runtime.pageController.replayActions(params.autoReplayActions)
     : [];
 
   if (params.waitAfterHookMs && params.waitAfterHookMs > 0) {
@@ -594,7 +634,7 @@ async function runAnalyzeTargetWorkflow(runtime: ReturnType<typeof getJSHookRunt
 
   const [understand, crypto] = await Promise.all([
     runtime.analyzer.understand({code: analysisCode, focus: 'security'}),
-    runtime.cryptoDetector.detect({code: analysisCode, useAI: params.useAI} as any),
+    runtime.cryptoDetector.detect({code: analysisCode}),
   ]);
 
   const deobfuscation = params.runDeobfuscation
@@ -638,7 +678,7 @@ async function runAnalyzeTargetWorkflow(runtime: ReturnType<typeof getJSHookRunt
   });
   const collectionDependencies =
     collectResult && typeof collectResult === 'object'
-      ? (collectResult as any).dependencies
+      ? (collectResult as {dependencies?: unknown}).dependencies
       : undefined;
 
   return {
@@ -680,6 +720,16 @@ async function runAnalyzeTargetWorkflow(runtime: ReturnType<typeof getJSHookRunt
       requestSinks: signatureHints.requestSinks,
     },
     actionPlan,
+    recommendedNextSteps: actionPlan,
+    whyTheseSteps: buildWhyTheseSteps({
+      requestFingerprints,
+      candidateFunctions: signatureHints.candidateFunctions,
+      hookRecordCount: hookTimeline.length,
+    }),
+    stopIf: buildStopConditions({
+      hookRecordCount: hookTimeline.length,
+      suspiciousFlowCount: suspiciousFlows.length,
+    }),
     nextActions: [
       crypto.algorithms.length > 0 ? 'Focus on crypto-related files from top-priority list.' : null,
       hookTimeline.length === 0 ? 'Trigger page interactions and rerun get_hook_data / analyze_target.' : null,
@@ -687,6 +737,69 @@ async function runAnalyzeTargetWorkflow(runtime: ReturnType<typeof getJSHookRunt
     ].filter((item): item is string => Boolean(item)),
   };
 }
+
+export const recordReverseEvidence = defineTool({
+  name: 'record_reverse_evidence',
+  description: 'Append structured reverse-engineering evidence to a task artifact log.',
+  annotations: {category: ToolCategory.REVERSE_ENGINEERING, readOnlyHint: false},
+  schema: {
+    taskId: zod.string(),
+    taskSlug: zod.string(),
+    targetUrl: zod.string(),
+    goal: zod.string(),
+    channel: zod.string().default('runtime-evidence'),
+    targetKeywords: zod.array(zod.string()).optional(),
+    targetUrlPatterns: zod.array(zod.string()).optional(),
+    targetFunctionNames: zod.array(zod.string()).optional(),
+    targetActionDescription: zod.string().optional(),
+    entry: zod.record(zod.string(), zod.unknown()),
+  },
+  handler: async (request, response) => {
+    const runtime = getJSHookRuntime();
+    const task = await runtime.reverseTaskStore.openTask({
+      taskId: request.params.taskId,
+      slug: request.params.taskSlug,
+      targetUrl: request.params.targetUrl,
+      goal: request.params.goal,
+    });
+    const targetContext = {
+      targetKeywords: request.params.targetKeywords ?? [],
+      targetUrlPatterns: request.params.targetUrlPatterns ?? [],
+      targetFunctionNames: request.params.targetFunctionNames ?? [],
+      targetActionDescription: request.params.targetActionDescription ?? '',
+    };
+    const hasTargetContext = targetContext.targetKeywords.length > 0 ||
+      targetContext.targetUrlPatterns.length > 0 ||
+      targetContext.targetFunctionNames.length > 0 ||
+      targetContext.targetActionDescription.length > 0;
+
+    await task.appendLog(request.params.channel, {
+      ...request.params.entry,
+      ...(hasTargetContext ? {targetContext} : {}),
+    });
+
+    if (hasTargetContext) {
+      const existingTargetContext = await runtime.reverseTaskStore.readSnapshot<Record<string, unknown>>(
+        request.params.taskId,
+        'target-context.json',
+      );
+      await task.writeSnapshot('target-context.json', {
+        ...existingTargetContext,
+        ...targetContext,
+      });
+    }
+
+    response.appendResponseLine('```json');
+    response.appendResponseLine(JSON.stringify({
+      ok: true,
+      taskId: task.taskId,
+      taskDir: task.taskDir,
+      channel: request.params.channel,
+      targetContext: hasTargetContext ? targetContext : undefined,
+    }, null, 2));
+    response.appendResponseLine('```');
+  },
+});
 
 export const analyzeTarget = defineTool({
   name: 'analyze_target',
@@ -726,7 +839,7 @@ export const analyzeTarget = defineTool({
   },
   handler: async (request, response) => {
     const runtime = getJSHookRuntime();
-    const result = await runAnalyzeTargetWorkflow(runtime, request.params as AnalyzeTargetParams);
+    const result = await runAnalyzeTargetWorkflow(runtime, request.params);
 
     response.appendResponseLine('```json');
     response.appendResponseLine(JSON.stringify(result, null, 2));
@@ -796,15 +909,19 @@ export const riskPanel = defineTool({
 
     const [understand, crypto] = await Promise.all([
       runtime.analyzer.understand({code, focus: 'security'}),
-      runtime.cryptoDetector.detect({code, useAI: request.params.useAI} as any),
+      runtime.cryptoDetector.detect({code}),
     ]);
 
     const securityRisks = Array.isArray(understand.securityRisks) ? understand.securityRisks : [];
     const highSeverityCount = securityRisks.filter((risk) => risk.severity === 'critical' || risk.severity === 'high').length;
-    const cryptoIssues = Array.isArray((crypto as any).securityIssues) ? (crypto as any).securityIssues : [];
-    const algorithms = Array.isArray((crypto as any).algorithms) ? (crypto as any).algorithms : [];
-    const dangerousAlgorithms = algorithms.filter((algo: any) =>
-      ['md5', 'sha1', 'rc4', 'des'].includes(String(algo.name).toLowerCase()),
+    const cryptoResult = crypto as {
+      securityIssues?: unknown[];
+      algorithms?: Array<{name?: string}>;
+    };
+    const cryptoIssues = Array.isArray(cryptoResult.securityIssues) ? cryptoResult.securityIssues : [];
+    const algorithms = Array.isArray(cryptoResult.algorithms) ? cryptoResult.algorithms : [];
+    const dangerousAlgorithms = algorithms.filter((algo) =>
+      ['md5', 'sha1', 'rc4', 'des'].includes(String(algo.name ?? '').toLowerCase()),
     );
 
     let hookSignalCount = 0;
@@ -834,7 +951,7 @@ export const riskPanel = defineTool({
         highSeverityRisks: highSeverityCount,
         cryptoAlgorithms: algorithms.length,
         cryptoIssues: cryptoIssues.length,
-        dangerousAlgorithms: dangerousAlgorithms.map((algo: any) => algo.name),
+        dangerousAlgorithms: dangerousAlgorithms.map((algo) => algo.name ?? 'unknown'),
         hookSignals: hookSignalCount,
       },
       recommendations: [

@@ -336,6 +336,23 @@ export class PageController {
   }
 
   /**
+   * 在后续文档创建前注入脚本
+   */
+  async injectScriptOnNewDocument(scriptContent: string): Promise<void> {
+    const page = await this.collector.getActivePage();
+
+    await page.evaluateOnNewDocument((script) => {
+      // Run script directly in the new document context.
+      // This avoids relying on DOM readiness (head/body may not exist yet)
+      // and is more reliable than appending an inline <script> element.
+      // eslint-disable-next-line no-new-func
+      new Function(script)();
+    }, scriptContent);
+
+    logger.info('Preload script registered for future documents');
+  }
+
+  /**
    * 🆕 设置Cookie
    */
   async setCookies(cookies: Array<{

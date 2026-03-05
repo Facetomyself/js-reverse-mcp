@@ -1,10 +1,62 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
 import { writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, it } from 'node:test';
+
 import OpenAI from 'openai';
+
 import { OpenAIProvider } from '../../../src/services/OpenAIProvider.js';
+
+interface OpenAICompletionPayloadLike {
+  model?: string;
+  temperature?: number;
+  max_tokens?: number;
+  messages: Array<{
+    content: Array<{
+      image_url: {
+        url: string;
+      };
+    }> | string;
+  }>;
+}
+
+interface OpenAIClientLike {
+  chat: {
+    completions: {
+      create(payload?: unknown): Promise<{
+        choices: Array<{ message: { content: string | null } }>;
+        usage?: {
+          prompt_tokens: number;
+          completion_tokens: number;
+          total_tokens: number;
+        };
+      }>;
+    };
+  };
+}
+
+interface OpenAIProviderHarness {
+  client: OpenAIClientLike;
+  getMimeType(extension: string): string;
+  chat(
+    messages: Array<{ role: string; content: string }>,
+    options?: { model?: string; temperature?: number; maxTokens?: number },
+  ): Promise<{
+    content: string;
+    usage?: {
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+    };
+  }>;
+  analyzeImage(imageInput: string, prompt: string, isFilePath?: boolean): Promise<string>;
+}
 
 describe('OpenAIProvider (mocked)', () => {
   it('throws when api key is missing', () => {
@@ -15,7 +67,9 @@ describe('OpenAIProvider (mocked)', () => {
   });
 
   it('maps chat response into internal response shape', async () => {
-    const provider = new OpenAIProvider({ apiKey: 'sk-test-key' }) as any;
+    const provider = new OpenAIProvider({
+      apiKey: 'sk-test-key',
+    }) as unknown as OpenAIProviderHarness;
     provider.client = {
       chat: {
         completions: {
@@ -37,7 +91,9 @@ describe('OpenAIProvider (mocked)', () => {
   });
 
   it('throws when chat has no choice message', async () => {
-    const provider = new OpenAIProvider({ apiKey: 'sk-test-key' }) as any;
+    const provider = new OpenAIProvider({
+      apiKey: 'sk-test-key',
+    }) as unknown as OpenAIProviderHarness;
     provider.client = {
       chat: {
         completions: {
@@ -53,7 +109,9 @@ describe('OpenAIProvider (mocked)', () => {
   });
 
   it('passes through generic errors from chat', async () => {
-    const provider = new OpenAIProvider({ apiKey: 'sk-test-key' }) as any;
+    const provider = new OpenAIProvider({
+      apiKey: 'sk-test-key',
+    }) as unknown as OpenAIProviderHarness;
     provider.client = {
       chat: {
         completions: {
@@ -71,13 +129,15 @@ describe('OpenAIProvider (mocked)', () => {
   });
 
   it('handles base64/http/data-url and file-path image inputs', async () => {
-    const calls: any[] = [];
-    const provider = new OpenAIProvider({ apiKey: 'sk-test-key' }) as any;
+    const calls: OpenAICompletionPayloadLike[] = [];
+    const provider = new OpenAIProvider({
+      apiKey: 'sk-test-key',
+    }) as unknown as OpenAIProviderHarness;
     provider.client = {
       chat: {
         completions: {
-          create: async (payload: any) => {
-            calls.push(payload);
+          create: async (payload?: unknown) => {
+            calls.push(payload as OpenAICompletionPayloadLike);
             return { choices: [{ message: { content: 'vision-ok' } }] };
           },
         },
@@ -98,7 +158,17 @@ describe('OpenAIProvider (mocked)', () => {
     assert.strictEqual(out3, 'vision-ok');
     assert.strictEqual(out4, 'vision-ok');
 
-    const urls = calls.map((c) => c.messages[0].content[1].image_url.url);
+    const urls = calls.map((c) => {
+      const content = c.messages[0]?.content;
+      if (!Array.isArray(content)) {
+        throw new Error('Expected image content payload');
+      }
+      const imagePart = content[1];
+      if (!imagePart || !('image_url' in imagePart)) {
+        throw new Error('Expected image_url part');
+      }
+      return imagePart.image_url.url;
+    });
     assert.ok(urls[0].startsWith('data:image/png;base64,'));
     assert.strictEqual(urls[1], 'https://example.com/i.png');
     assert.strictEqual(urls[2], 'data:image/png;base64,abcd');
@@ -106,13 +176,17 @@ describe('OpenAIProvider (mocked)', () => {
   });
 
   it('falls back to png mime type for unknown extensions', () => {
-    const provider = new OpenAIProvider({ apiKey: 'sk-test-key' }) as any;
+    const provider = new OpenAIProvider({
+      apiKey: 'sk-test-key',
+    }) as unknown as OpenAIProviderHarness;
     assert.strictEqual(provider.getMimeType('jpg'), 'image/jpeg');
     assert.strictEqual(provider.getMimeType('unknown'), 'image/png');
   });
 
   it('covers OpenAI APIError and unknown error formatting paths', async () => {
-    const provider = new OpenAIProvider({ apiKey: 'sk-test-key' }) as any;
+    const provider = new OpenAIProvider({
+      apiKey: 'sk-test-key',
+    }) as unknown as OpenAIProviderHarness;
 
     const apiError = Object.assign(new Error('rate limited'), {
       status: 429,
@@ -131,7 +205,10 @@ describe('OpenAIProvider (mocked)', () => {
     };
     await assert.rejects(
       async () => provider.chat([{ role: 'user', content: 'hello' }]),
-      (err: any) => err?.status === 429 && err?.code === 'rate_limit',
+      (err: unknown) =>
+        typeof err === 'object' && err !== null && 'status' in err && 'code' in err &&
+        (err as { status?: number; code?: string }).status === 429 &&
+        (err as { status?: number; code?: string }).code === 'rate_limit',
     );
 
     provider.client = {
@@ -150,7 +227,9 @@ describe('OpenAIProvider (mocked)', () => {
   });
 
   it('throws when analyzeImage receives empty choice payload', async () => {
-    const provider = new OpenAIProvider({ apiKey: 'sk-test-key' }) as any;
+    const provider = new OpenAIProvider({
+      apiKey: 'sk-test-key',
+    }) as unknown as OpenAIProviderHarness;
     provider.client = {
       chat: {
         completions: {
@@ -166,13 +245,15 @@ describe('OpenAIProvider (mocked)', () => {
   });
 
   it('covers empty content and no-usage response branches', async () => {
-    let payload: any = null;
-    const provider = new OpenAIProvider({ apiKey: 'sk-test-key' }) as any;
+    const payloads: OpenAICompletionPayloadLike[] = [];
+    const provider = new OpenAIProvider({
+      apiKey: 'sk-test-key',
+    }) as unknown as OpenAIProviderHarness;
     provider.client = {
       chat: {
         completions: {
-          create: async (input: any) => {
-            payload = input;
+          create: async (input?: unknown) => {
+            payloads.push(input as OpenAICompletionPayloadLike);
             return { choices: [{ message: { content: null } }] };
           },
         },
@@ -186,13 +267,17 @@ describe('OpenAIProvider (mocked)', () => {
     });
     assert.strictEqual(out.content, '');
     assert.strictEqual(out.usage, undefined);
+    const payload = payloads[0];
+    assert.ok(payload);
     assert.strictEqual(payload.model, 'gpt-test');
     assert.strictEqual(payload.temperature, 0.3);
     assert.strictEqual(payload.max_tokens, 99);
   });
 
   it('covers analyzeImage file path without extension branch', async () => {
-    const provider = new OpenAIProvider({ apiKey: 'sk-test-key' }) as any;
+    const provider = new OpenAIProvider({
+      apiKey: 'sk-test-key',
+    }) as unknown as OpenAIProviderHarness;
     provider.client = {
       chat: {
         completions: {

@@ -1,8 +1,14 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import { zod } from '../../../src/third_party/index.js';
-import { CLOSE_PAGE_ERROR, defineTool, timeoutSchema } from '../../../src/tools/ToolDefinition.js';
 import { ToolCategory } from '../../../src/tools/categories.js';
+import { CLOSE_PAGE_ERROR, defineTool, timeoutSchema } from '../../../src/tools/ToolDefinition.js';
 
 describe('ToolDefinition extended', () => {
   it('defines tool and transforms timeout values', () => {
@@ -13,7 +19,7 @@ describe('ToolDefinition extended', () => {
       schema: {
         ...timeoutSchema,
       },
-      handler: async () => {},
+      handler: async () => undefined,
     });
 
     assert.strictEqual(tool.name, 'tmp_tool');

@@ -1,5 +1,11 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import {
   analyzeStrength,
   detectByAST,
@@ -50,7 +56,10 @@ describe('CryptoDetectorEnhanced', () => {
 
     mergeParameters(algorithms, params);
     assert.strictEqual(algorithms[0].parameters?.mode, 'CBC');
-    assert.strictEqual((algorithms[0].parameters as any)?.keySize, 256);
+    assert.strictEqual(
+      (algorithms[0].parameters as Record<string, unknown> | undefined)?.keySize,
+      256,
+    );
     assert.strictEqual(algorithms[1].parameters, undefined);
   });
 
@@ -64,7 +73,11 @@ describe('CryptoDetectorEnhanced', () => {
         confidence: 1,
         usage: '',
         location: { file: 't', line: 1, column: 1 },
-        parameters: { mode: 'ECB', padding: 'NoPadding', keySize: 64 } as any,
+        parameters: {
+          mode: 'ECB',
+          padding: 'NoPadding',
+          keySize: 64,
+        } as Record<string, unknown>,
       },
       { name: 'RC4', type: 'symmetric', confidence: 1, usage: '', location: { file: 't', line: 1, column: 1 } },
     ];

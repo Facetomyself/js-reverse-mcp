@@ -231,6 +231,8 @@ export class McpResponse implements Response {
 
     let consoleData: ConsoleMessageData | undefined;
 
+    const consoleSourceMapHints = this.#getConsoleSourceMapHints(context);
+
     if (this.#attachedConsoleMessageId) {
       const message = context.getConsoleMessageById(
         this.#attachedConsoleMessageId,
@@ -242,6 +244,7 @@ export class McpResponse implements Response {
           consoleMessageStableId,
           type: consoleMessage.type(),
           message: consoleMessage.text(),
+          sourceMapHints: consoleSourceMapHints,
           args: await Promise.all(
             consoleMessage.args().map(async arg => {
               const stringArg = await arg.jsonValue().catch(() => {
@@ -303,6 +306,7 @@ export class McpResponse implements Response {
                 consoleMessageStableId,
                 type: consoleMessage.type(),
                 message: consoleMessage.text(),
+                sourceMapHints: consoleSourceMapHints,
                 args: await Promise.all(
                   consoleMessage.args().map(async arg => {
                     const stringArg = await arg.jsonValue().catch(() => {
@@ -541,6 +545,19 @@ export class McpResponse implements Response {
     return response;
   }
 
+  #getConsoleSourceMapHints(context: McpContext): Record<string, string> | undefined {
+    const scripts = context.debuggerContext?.getScripts?.();
+    if (!scripts?.length) {
+      return undefined;
+    }
+    const hints = Object.fromEntries(
+      scripts
+        .filter((script) => Boolean(script.url) && Boolean(script.sourceMapURL))
+        .map((script) => [script.url, script.sourceMapURL as string]),
+    );
+    return Object.keys(hints).length > 0 ? hints : undefined;
+  }
+
   #formatNetworkRequestData(
     context: McpContext,
     data: {
@@ -556,9 +573,14 @@ export class McpResponse implements Response {
 
     const httpRequest = context.getNetworkRequestById(id);
     response.push(`## Request ${httpRequest.url()}`);
+    response.push(`Method: ${httpRequest.method()}`);
+    response.push(`Resource Type: ${httpRequest.resourceType()}`);
     response.push(`Status:  ${getStatusFromRequest(httpRequest)}`);
-    response.push(`### Request Headers`);
-    for (const line of getFormattedHeaderValue(httpRequest.headers())) {
+    const requestHeaders = httpRequest.headers();
+    response.push(
+      `### Request Headers (${Object.keys(requestHeaders).length})`,
+    );
+    for (const line of getFormattedHeaderValue(requestHeaders)) {
       response.push(line);
     }
 
@@ -569,8 +591,11 @@ export class McpResponse implements Response {
 
     const httpResponse = httpRequest.response();
     if (httpResponse) {
-      response.push(`### Response Headers`);
-      for (const line of getFormattedHeaderValue(httpResponse.headers())) {
+      const responseHeaders = httpResponse.headers();
+      response.push(
+        `### Response Headers (${Object.keys(responseHeaders).length})`,
+      );
+      for (const line of getFormattedHeaderValue(responseHeaders)) {
         response.push(line);
       }
     }
@@ -582,7 +607,7 @@ export class McpResponse implements Response {
 
     const httpFailure = httpRequest.failure();
     if (httpFailure) {
-      response.push(`### Request failed with`);
+      response.push(`### Request Failure`);
       response.push(httpFailure.errorText);
     }
 

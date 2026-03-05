@@ -1,10 +1,16 @@
 /**
- * Unit tests for GeminiProvider
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
  */
-
-import { describe, it, mock, beforeEach } from 'node:test';
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import { GeminiProvider } from '../../../src/services/GeminiProvider.js';
+
+interface GeminiProviderHarness {
+  checkCLIAvailable(): boolean;
+}
 
 describe('GeminiProvider', () => {
   describe('Constructor', () => {
@@ -168,10 +174,11 @@ describe('GeminiProvider', () => {
         cliPath: 'gemini-cli',
         useAPI: false,
       });
+      const providerHarness = provider as unknown as GeminiProviderHarness;
 
       // Mock CLI availability check to return true
-      const originalCheckCLI = (provider as any).checkCLIAvailable;
-      (provider as any).checkCLIAvailable = () => true;
+      const originalCheckCLI = providerHarness.checkCLIAvailable;
+      providerHarness.checkCLIAvailable = () => true;
 
       await assert.rejects(
         async () => {
@@ -183,7 +190,7 @@ describe('GeminiProvider', () => {
       );
 
       // Restore original method
-      (provider as any).checkCLIAvailable = originalCheckCLI;
+      providerHarness.checkCLIAvailable = originalCheckCLI;
     });
   });
 

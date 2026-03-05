@@ -19,6 +19,7 @@
 - 脚本与源码分析：`list_scripts`、`get_script_source`、`find_in_script`、`search_in_scripts`
 - 断点与执行控制：`set_breakpoint`、`set_breakpoint_on_text`、`resume`、`pause`、`step_over/into/out`
 - Hook 与运行时观测：`create_hook`、`inject_hook`、`get_hook_data`、`hook_function`、`trace_function`
+- 页面早期注入：`inject_preload_script`，可在页面脚本执行前挂早期 hook、补环境脚本和首屏初始化采样
 - 网络与请求链路：`list_network_requests`、`get_network_request`、`get_request_initiator`、`break_on_xhr`
 - 一体化逆向工作流：`analyze_target`、`collect_code`、`understand_code`、`deobfuscate_code`、`risk_panel`
 - 页面自动化与 DOM：`navigate_page`、`query_dom`、`click_element`、`type_text`、`take_screenshot`
@@ -26,6 +27,14 @@
 - 反检测能力：`inject_stealth`、`list_stealth_presets`、`set_user_agent`
 
 完整参数说明见 `docs/tool-reference.md`。
+
+## 最近增强
+
+- `--autoConnect`：优先探测本机常见 DevTools 端口并接管已经打开的 Chrome，适合手动登录后再让 AI 接管。
+- `inject_preload_script`：在后续文档加载前执行脚本，适合首屏初始化、首次请求前参数生成、早期 hook 和补环境采样。
+- 断点防卡死自动恢复：同一断点短时间高频命中时会自动执行 `resume` + `remove_breakpoint`，并在 `get_paused_info` 给出恢复提示，降低长时间无响应风险。
+- response body 超时降级：读取大响应体或卡住的响应时会超时返回，不再把整条采样链路拖死。
+- console 错误链展开：调试输出会展开 `Error.stack` 和 `cause` 链，便于从页面报错追到真实调用路径。
 
 ## 快速开始（3 分钟）
 
@@ -132,6 +141,7 @@ curl http://127.0.0.1:9222/json/version
 注意：
 
 - `--browserUrl` 与 `--wsEndpoint` 二选一，不要同时配置
+- 也可以直接加 `--autoConnect`，让服务优先探测本机常见 DevTools 端口并自动接管已打开的 Chrome
 - 如果端口不是 `9222`，把所有示例里的端口替换成你的实际端口
 - 已连接远程 Chrome 时，不要再强制本服务自行启动另一个浏览器实例
 
@@ -160,6 +170,14 @@ command = "node"
 args = ["/ABSOLUTE/PATH/js-reverse-mcp-main/build/src/index.js"]
 ```
 
+如果你平时是先手动开好 Chrome 再让 MCP 接管，可以把参数改成：
+
+```toml
+[mcp_servers.js-reverse]
+command = "node"
+args = ["/ABSOLUTE/PATH/js-reverse-mcp-main/build/src/index.js", "--autoConnect"]
+```
+
 如需连接已开启的 Chrome，可在 `args` 里追加：
 
 ```toml
@@ -180,7 +198,13 @@ args = [
 
 - `skills/mcp-js-reverse-playbook`
 
-用于规范化执行前端 JS 逆向流程（Hook 优先、补环境、VMP 插桩、AST 去混淆、证据化输出）。
+用于规范化执行前端 JS 逆向流程（页面观察、task artifact 沉淀、local rebuild、本地补环境、VMP 插桩、AST 去混淆、证据化输出）。
+
+配套模板：
+
+- `docs/reverse-update-prompt-template.md`
+- `docs/reverse-report-template.md`
+- `docs/algorithm-upgrade-template.md`
 
 ### 本地安装（在仓库目录）
 
@@ -254,10 +278,27 @@ DEBUG=mcp:*
 
 ## 推荐逆向工作流
 
-### Hook 优先策略
+### Observe-first / local rebuild 策略
 
-> **重要：优先使用 Hook 工具而非断点工具。**
+> **重要：优先页面观察，随后最小化 Hook 采样，再进入 local rebuild。**
 >
+> 不要跳过页面证据直接猜 Node 环境。
+
+推荐顺序：
+
+1. 页面观察：`analyze_target`、`search_in_scripts`、`list_network_requests`、`get_request_initiator`
+2. 运行时采样：`create_hook`、`inject_hook`、`get_hook_data`
+3. 证据入库：`record_reverse_evidence`
+4. 本地导出：`export_rebuild_bundle`
+5. 本地补环境：`diff_env_requirements` + 逐步补 `env/entry.js`
+
+每次任务建议都写入 `artifacts/tasks/<taskId>/` 形成 task artifact，便于 Codex / Claude / Gemini 续做。
+
+相关文档：
+
+- `docs/reverse-artifacts.md`
+- `docs/codex-reverse-workflow.md`
+- `docs/reverse-task-index.md`
 > 本项目提供两套动态分析机制：**Hook（注入式）** 和 **Breakpoint（断点式）**。
 > 对于 AI 客户端，Hook 方式更可靠，因为断点需要暂停/恢复执行的多步协调，容易因时序问题导致超时或状态异常。
 

@@ -14,6 +14,13 @@ export interface ConsoleMessageData {
   count?: number;
   description?: string;
   args?: string[];
+  sourceMapHints?: Record<string, string>;
+}
+
+interface SerializedErrorLike {
+  message?: string;
+  stack?: string;
+  cause?: SerializedErrorLike;
 }
 
 // The short format for a console message, based on a previous format.
@@ -50,6 +57,68 @@ function formatArg(arg: unknown) {
   return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
 }
 
+function tryParseSerializedError(arg: string): SerializedErrorLike | undefined {
+  try {
+    const parsed = JSON.parse(arg) as SerializedErrorLike;
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      (typeof parsed.message === 'string' || typeof parsed.stack === 'string')
+    ) {
+      return parsed;
+    }
+  } catch {
+    // Ignore non-JSON arguments.
+  }
+  return undefined;
+}
+
+function annotateStackLine(
+  line: string,
+  sourceMapHints?: Record<string, string>,
+): string {
+  if (!sourceMapHints || !line.includes(':')) {
+    return line;
+  }
+
+  const candidates = Object.keys(sourceMapHints).sort((a, b) => b.length - a.length);
+  for (const candidate of candidates) {
+    if (!line.includes(candidate)) {
+      continue;
+    }
+    const sourceMapURL = sourceMapHints[candidate];
+    if (!sourceMapURL || line.includes('[SourceMap:')) {
+      continue;
+    }
+    return `${line} [SourceMap: ${sourceMapURL}]`;
+  }
+
+  return line;
+}
+
+function formatErrorChainWithSourceMaps(
+  error: SerializedErrorLike,
+  sourceMapHints?: Record<string, string>,
+  depth = 0,
+): string[] {
+  const prefix = depth === 0 ? 'Error' : `${'  '.repeat(depth - 1)}Cause`;
+  const lines = [`${prefix}: ${error.message ?? '<unknown error>'}`];
+  if (error.stack) {
+    lines.push(`${'  '.repeat(depth)}Stack:`);
+    for (const line of error.stack.split('\n')) {
+      lines.push(
+        `${'  '.repeat(depth)}${annotateStackLine(line, sourceMapHints)}`,
+      );
+    }
+  }
+  if (error.cause) {
+    lines.push(
+      ...formatErrorChainWithSourceMaps(error.cause, sourceMapHints, depth + 1),
+    );
+  }
+  return lines;
+}
+
 function formatArgs(consoleData: ConsoleMessageData): string {
   const args = getArgs(consoleData);
 
@@ -61,6 +130,17 @@ function formatArgs(consoleData: ConsoleMessageData): string {
 
   for (const [key, arg] of args.entries()) {
     result.push(`Arg #${key}: ${formatArg(arg)}`);
+    if (typeof arg === 'string') {
+      const parsedError = tryParseSerializedError(arg);
+      if (parsedError) {
+        result.push(
+          ...formatErrorChainWithSourceMaps(
+            parsedError,
+            consoleData.sourceMapHints,
+          ),
+        );
+      }
+    }
   }
 
   return result.join('\n');

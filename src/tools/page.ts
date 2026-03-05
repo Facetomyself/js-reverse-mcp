@@ -444,12 +444,12 @@ export const checkBrowserHealth = defineTool({
     const runtime = getJSHookRuntime();
     const issues: Array<{code: string; message: string}> = [];
     const browser = runtime.browserManager.getBrowser();
-    const connected = Boolean(browser && browser.isConnected());
-    if (!connected) {
-      issues.push({
-        code: 'BROWSER_DISCONNECTED',
-        message: 'Browser is not connected. Use browserUrl/wsEndpoint or start remote debugging.',
-      });
+    let connected = Boolean(browser && browser.isConnected());
+    try {
+      const status = await runtime.collector.getStatus();
+      connected = connected || status.running;
+    } catch {
+      // Fall through to page-level probes below.
     }
 
     let pageReady = false;
@@ -458,6 +458,7 @@ export const checkBrowserHealth = defineTool({
     try {
       const page = await runtime.pageController.getPage();
       pageReady = true;
+      connected = true;
       url = page.url();
       title = await page.title();
       await runtime.pageController.evaluate('1+1');
@@ -466,6 +467,13 @@ export const checkBrowserHealth = defineTool({
       issues.push({
         code: 'NO_ACTIVE_PAGE',
         message: `No controllable active page: ${message}`,
+      });
+    }
+
+    if (!connected) {
+      issues.push({
+        code: 'BROWSER_DISCONNECTED',
+        message: 'Browser is not connected. Use browserUrl/wsEndpoint or start remote debugging.',
       });
     }
 

@@ -1,12 +1,11 @@
 /**
- * Unit tests for OpenAIProvider
- * Tests provider initialization, chat method, and error handling
- * 
- * Requirements: 4.2, 12.2
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
  */
-
-import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import { OpenAIProvider } from '../../../src/services/OpenAIProvider.js';
 
 const runProviderTests = process.env.RUN_PROVIDER_TESTS === 'true';
@@ -362,7 +361,7 @@ describe('OpenAIProvider', {skip: !runProviderTests}, () => {
         async () => {
           await provider.chat([{ role: 'user', content: 'Hello' }]);
         },
-        (error: any) => {
+        (error: unknown) => {
           // Should be an Error object
           assert.ok(error instanceof Error);
           return true;
@@ -378,7 +377,7 @@ describe('OpenAIProvider', {skip: !runProviderTests}, () => {
       try {
         await provider.chat([{ role: 'user', content: 'Hello' }]);
         assert.fail('Should have thrown an error');
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Error should have status property for retry logic
         assert.ok(error instanceof Error);
       }

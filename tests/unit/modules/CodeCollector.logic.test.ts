@@ -1,7 +1,118 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
 import { CodeCollector } from '../../../src/modules/collector/CodeCollector.js';
 import type { CodeFile, PuppeteerConfig } from '../../../src/types/index.js';
+
+interface CacheHarness {
+  get(url: string, options: unknown): Promise<unknown>;
+  set(url: string, result: unknown, options: unknown): Promise<void>;
+  clear(): Promise<void>;
+  init(): Promise<void>;
+  getStats(): Promise<Record<string, unknown>>;
+}
+
+interface CompressorHarness {
+  shouldCompress?(content: string): boolean;
+  compressBatch?(files: Array<{url: string; content: string}>): Promise<Array<Record<string, unknown>>>;
+  getStats(): Record<string, unknown>;
+  clearCache?(): void;
+  resetStats?(): void;
+  getCacheSize?(): number;
+}
+
+interface SmartCollectorHarness {
+  smartCollect(page: unknown, files: CodeFile[]): Promise<CodeFile[]>;
+}
+
+interface BrowserHarness {
+  isConnected(): boolean;
+  on(event: string, handler: () => void): void;
+  pages(): Promise<unknown[]>;
+  version(): Promise<string>;
+}
+
+interface BrowserManagerHarness {
+  getBrowser(): BrowserHarness | null;
+  getCurrentPage(): unknown;
+  newPage(): Promise<unknown>;
+  launch(): Promise<BrowserHarness>;
+  close(): Promise<void>;
+}
+
+interface CDPHarness {
+  send(command: string, params?: unknown): Promise<unknown>;
+  on(event: string, handler: (params: unknown) => Promise<void>): void;
+  off(event: string, handler: (params: unknown) => Promise<void>): void;
+  detach(): Promise<void>;
+}
+
+interface CollectPageHarness {
+  setDefaultTimeout(timeout: number): void;
+  setUserAgent(userAgent: string): Promise<void>;
+  createCDPSession(): Promise<CDPHarness>;
+  goto(url: string, options?: unknown): Promise<void>;
+  close(): Promise<void>;
+  evaluate(...args: unknown[]): Promise<unknown>;
+  url(): string;
+  waitForNetworkIdle?(options?: {idleTime?: number; timeout?: number}): Promise<void>;
+  isClosed?(): boolean;
+}
+
+interface CodeCollectorHarness {
+  cacheEnabled: boolean;
+  cache: CacheHarness;
+  smartCollector: SmartCollectorHarness;
+  compressor: CompressorHarness;
+  browser: BrowserHarness | null;
+  browserManager: BrowserManagerHarness;
+  collectedUrls: Set<string>;
+  collectedFilesCache: Map<string, CodeFile>;
+  collect(options: Record<string, unknown>): Promise<unknown>;
+  clearFileCache(): Promise<void>;
+  clearAllData(): Promise<void>;
+  getAllStats(): Promise<Record<string, unknown>>;
+  getStatus(): Promise<{running: boolean; pagesCount: number; version?: string}>;
+  getActivePage(): Promise<unknown>;
+  init(): Promise<void>;
+  close(): Promise<void>;
+  createPage(url?: string): Promise<unknown>;
+  navigateWithRetry(page: {goto(url: string, options?: unknown): Promise<void>}, url: string, options: unknown, retries: number): Promise<void>;
+  getPerformanceMetrics(page: {evaluate(...args: unknown[]): Promise<unknown>}): Promise<Record<string, unknown>>;
+  collectPageMetadata(page: {evaluate(...args: unknown[]): Promise<unknown>}): Promise<Record<string, unknown>>;
+  shouldCollectUrl(url: string, patterns?: string[]): boolean;
+  setCacheEnabled(enabled: boolean): void;
+  getBrowser(): BrowserHarness | null;
+  getCollectionStats(): {totalCollected: number; uniqueUrls: number};
+  clearCache(): void;
+  getCollectedFilesSummary(): Array<{url: string; size: number; type: string; truncated?: boolean; originalSize?: number}>;
+  getFileByUrl(url: string): CodeFile | null;
+  getFilesByPattern(pattern: string, limit?: number, maxTotalSize?: number): {
+    files: CodeFile[];
+    totalSize: number;
+    matched: number;
+    returned: number;
+    truncated: boolean;
+  };
+  getTopPriorityFiles(topN?: number, maxTotalSize?: number): {
+    files: CodeFile[];
+    totalSize: number;
+    totalFiles: number;
+  };
+  clearCollectedFilesCache(): void;
+  collectServiceWorkers(page: {evaluate(...args: unknown[]): Promise<unknown>}): Promise<CodeFile[]>;
+  collectWebWorkers(page: {evaluate(...args: unknown[]): Promise<unknown>; url(): string}): Promise<CodeFile[]>;
+  waitForDynamicScripts(page: {waitForNetworkIdle?(options?: {idleTime?: number; timeout?: number}): Promise<void>}, waitMs: number): Promise<void>;
+  MAX_SINGLE_FILE_SIZE: number;
+  cdpSession: unknown;
+  cdpListeners: {responseReceived?: (...args: unknown[]) => void};
+  RESPONSE_BODY_TIMEOUT_MS: number;
+}
 
 function makeConfig(overrides: Partial<PuppeteerConfig> = {}): PuppeteerConfig {
   return {
@@ -11,22 +122,22 @@ function makeConfig(overrides: Partial<PuppeteerConfig> = {}): PuppeteerConfig {
   };
 }
 
-function makeCollector(browserManagerOverrides: Record<string, unknown> = {}) {
-  const browserManager = {
+function makeCollector(browserManagerOverrides: Partial<BrowserManagerHarness> = {}): CodeCollectorHarness {
+  const browserManager: BrowserManagerHarness = {
     getBrowser: () => null,
     getCurrentPage: () => null,
     newPage: async () => ({}),
     launch: async () => ({
       isConnected: () => true,
-      on: () => {},
+      on: () => undefined,
       pages: async () => [],
       version: async () => 'Chrome/131',
     }),
-    close: async () => {},
+    close: async () => undefined,
     ...browserManagerOverrides,
-  } as any;
+  };
 
-  return new CodeCollector(makeConfig(), browserManager);
+  return new CodeCollector(makeConfig(), browserManager as unknown as ConstructorParameters<typeof CodeCollector>[1]) as unknown as CodeCollectorHarness;
 }
 
 describe('CodeCollector logic', () => {
@@ -38,21 +149,21 @@ describe('CodeCollector logic', () => {
       totalSize: 1,
       collectTime: 1,
     };
-    (collector as any).cacheEnabled = true;
-    (collector as any).cache = {
+    collector.cacheEnabled = true;
+    collector.cache = {
       get: async () => cached,
-      set: async () => {},
-      clear: async () => {},
-      init: async () => {},
+      set: async () => undefined,
+      clear: async () => undefined,
+      init: async () => undefined,
       getStats: async () => ({}),
     };
 
-    const out = await collector.collect({ url: 'https://example.com' } as any);
-    assert.strictEqual(out, cached as any);
+    const out = await collector.collect({ url: 'https://example.com' });
+    assert.strictEqual(out, cached);
   });
 
   it('collects external script via mocked CDP and cleans up session', async () => {
-    let responseHandler: ((params: any) => Promise<void>) | undefined;
+    let responseHandler: ((params: {requestId: string; type: string; response: {url: string; mimeType?: string}}) => Promise<void>) | undefined;
     let detached = 0;
     let pageClosed = 0;
     const cdp = {
@@ -62,19 +173,19 @@ describe('CodeCollector logic', () => {
         }
         return {};
       },
-      on: (event: string, handler: (params: any) => Promise<void>) => {
+      on: (event: string, handler: (params: {requestId: string; type: string; response: {url: string; mimeType?: string}}) => Promise<void>) => {
         if (event === 'Network.responseReceived') {
           responseHandler = handler;
         }
       },
-      off: () => {},
+      off: () => undefined,
       detach: async () => {
         detached += 1;
       },
-    };
-    const page = {
-      setDefaultTimeout: () => {},
-      setUserAgent: async () => {},
+    } as CDPHarness;
+    const page: CollectPageHarness = {
+      setDefaultTimeout: () => undefined,
+      setUserAgent: async () => undefined,
       createCDPSession: async () => cdp,
       goto: async () => {
         if (responseHandler) {
@@ -95,15 +206,15 @@ describe('CodeCollector logic', () => {
     const collector = makeCollector({
       newPage: async () => page,
     });
-    (collector as any).cache = {
+    collector.cache = {
       get: async () => null,
-      set: async () => {},
-      clear: async () => {},
-      init: async () => {},
+      set: async () => undefined,
+      clear: async () => undefined,
+      init: async () => undefined,
       getStats: async () => ({}),
     };
-    (collector as any).smartCollector = { smartCollect: async (_p: any, files: any[]) => files };
-    (collector as any).compressor = {
+    collector.smartCollector = { smartCollect: async (_page: unknown, files: CodeFile[]) => files };
+    collector.compressor = {
       shouldCompress: () => false,
       compressBatch: async () => [],
       getStats: () => ({ totalOriginalSize: 0, totalCompressedSize: 0, averageRatio: 0, cacheHits: 0, cacheMisses: 0 }),
@@ -116,10 +227,83 @@ describe('CodeCollector logic', () => {
       includeWebWorker: false,
       includeDynamic: false,
       compress: false,
-    } as any);
+    }) as {files: CodeFile[]};
 
     assert.strictEqual(out.files.length, 1);
     assert.strictEqual(out.files[0]?.url, 'https://cdn.site/app.js');
+    assert.strictEqual(detached, 1);
+    assert.strictEqual(pageClosed, 1);
+  });
+
+  it('times out stalled response body fetches and continues cleanup', async () => {
+    let responseHandler:
+      | ((params: {requestId: string; type: string; response: {url: string; mimeType?: string}}) => Promise<void>)
+      | undefined;
+    let detached = 0;
+    let pageClosed = 0;
+    const cdp = {
+      send: async (cmd: string) => {
+        if (cmd === 'Network.getResponseBody') {
+          return await new Promise(() => undefined);
+        }
+        return {};
+      },
+      on: (event: string, handler: (params: {requestId: string; type: string; response: {url: string; mimeType?: string}}) => Promise<void>) => {
+        if (event === 'Network.responseReceived') {
+          responseHandler = handler;
+        }
+      },
+      off: () => undefined,
+      detach: async () => {
+        detached += 1;
+      },
+    } as CDPHarness;
+    const page: CollectPageHarness = {
+      setDefaultTimeout: () => undefined,
+      setUserAgent: async () => undefined,
+      createCDPSession: async () => cdp,
+      goto: async () => {
+        await responseHandler?.({
+          requestId: 'r-timeout',
+          type: 'Script',
+          response: { url: 'https://cdn.site/slow.js', mimeType: 'application/javascript' },
+        });
+      },
+      close: async () => {
+        pageClosed += 1;
+      },
+      evaluate: async () => [],
+      url: () => 'https://example.com',
+    };
+
+    const collector = makeCollector({
+      newPage: async () => page,
+    });
+    collector.RESPONSE_BODY_TIMEOUT_MS = 10;
+    collector.cache = {
+      get: async () => null,
+      set: async () => undefined,
+      clear: async () => undefined,
+      init: async () => undefined,
+      getStats: async () => ({}),
+    };
+    collector.smartCollector = { smartCollect: async (_page: unknown, files: CodeFile[]) => files };
+    collector.compressor = {
+      shouldCompress: () => false,
+      compressBatch: async () => [],
+      getStats: () => ({ totalOriginalSize: 0, totalCompressedSize: 0, averageRatio: 0, cacheHits: 0, cacheMisses: 0 }),
+    };
+
+    const out = await collector.collect({
+      url: 'https://example.com',
+      includeInline: false,
+      includeServiceWorker: false,
+      includeWebWorker: false,
+      includeDynamic: false,
+      compress: false,
+    }) as {files: CodeFile[]};
+
+    assert.strictEqual(out.files.length, 0);
     assert.strictEqual(detached, 1);
     assert.strictEqual(pageClosed, 1);
   });
@@ -129,15 +313,15 @@ describe('CodeCollector logic', () => {
     let pageClosed = 0;
     const cdp = {
       send: async () => ({}),
-      on: () => {},
-      off: () => {},
+      on: () => undefined,
+      off: () => undefined,
       detach: async () => {
         detached += 1;
       },
-    };
-    const page = {
-      setDefaultTimeout: () => {},
-      setUserAgent: async () => {},
+    } as CDPHarness;
+    const page: CollectPageHarness = {
+      setDefaultTimeout: () => undefined,
+      setUserAgent: async () => undefined,
       createCDPSession: async () => cdp,
       goto: async () => {
         throw new Error('nav failed');
@@ -152,11 +336,11 @@ describe('CodeCollector logic', () => {
     const collector = makeCollector({
       newPage: async () => page,
     });
-    (collector as any).cache = {
+    collector.cache = {
       get: async () => null,
-      set: async () => {},
-      clear: async () => {},
-      init: async () => {},
+      set: async () => undefined,
+      clear: async () => undefined,
+      init: async () => undefined,
       getStats: async () => ({}),
     };
 
@@ -168,7 +352,7 @@ describe('CodeCollector logic', () => {
           includeServiceWorker: false,
           includeWebWorker: false,
           includeDynamic: false,
-        } as any);
+        });
       },
       /nav failed/,
     );
@@ -182,13 +366,16 @@ describe('CodeCollector logic', () => {
     let compressorCleared = 0;
     let compressorReset = 0;
 
-    (collector as any).cache = {
+    collector.cache = {
       clear: async () => {
         cacheCleared += 1;
       },
       getStats: async () => ({ memoryEntries: 1, diskEntries: 2 }),
+      get: async () => null,
+      set: async () => undefined,
+      init: async () => undefined,
     };
-    (collector as any).compressor = {
+    collector.compressor = {
       clearCache: () => {
         compressorCleared += 1;
       },
@@ -199,8 +386,8 @@ describe('CodeCollector logic', () => {
       getCacheSize: () => 0,
     };
 
-    (collector as any).collectedUrls.add('https://a.js');
-    (collector as any).collectedFilesCache.set('https://a.js', {
+    collector.collectedUrls.add('https://a.js');
+    collector.collectedFilesCache.set('https://a.js', {
       url: 'https://a.js',
       content: 'x',
       size: 1,
@@ -208,11 +395,11 @@ describe('CodeCollector logic', () => {
     });
 
     collector.setCacheEnabled(false);
-    assert.strictEqual((collector as any).cacheEnabled, false);
+    assert.strictEqual(collector.cacheEnabled, false);
 
     await collector.clearFileCache();
     await collector.clearAllData();
-    const stats = await collector.getAllStats();
+    const stats = await collector.getAllStats() as {collector: {collectedUrls: number}};
 
     assert.strictEqual(cacheCleared, 2);
     assert.strictEqual(compressorCleared, 1);
@@ -224,10 +411,11 @@ describe('CodeCollector logic', () => {
     const collector = makeCollector();
     const managerBrowser = {
       isConnected: () => true,
+      on: () => undefined,
       pages: async () => [{}, {}],
       version: async () => 'Chrome/131',
     };
-    (collector as any).browserManager.getBrowser = () => managerBrowser;
+    collector.browserManager.getBrowser = () => managerBrowser as BrowserHarness;
 
     const running = await collector.getStatus();
     assert.deepStrictEqual(running, {
@@ -236,8 +424,9 @@ describe('CodeCollector logic', () => {
       version: 'Chrome/131',
     });
 
-    (collector as any).browser = {
+    collector.browser = {
       isConnected: () => true,
+      on: () => undefined,
       pages: async () => {
         throw new Error('closed');
       },
@@ -257,24 +446,45 @@ describe('CodeCollector logic', () => {
       newPage: async () => createdPage,
     });
 
-    (collector as any).browser = {
+    collector.browser = {
       isConnected: () => true,
+      on: () => undefined,
       pages: async () => [fallbackPage],
+      version: async () => 'Chrome/131',
     };
 
     const pageFromManager = await collector.getActivePage();
-    assert.strictEqual(pageFromManager, activePage as any);
+    assert.strictEqual(pageFromManager, activePage);
 
-    (collector as any).browserManager.getCurrentPage = () => null;
+    collector.browserManager.getCurrentPage = () => null;
     const pageFromBrowser = await collector.getActivePage();
-    assert.strictEqual(pageFromBrowser, fallbackPage as any);
+    assert.strictEqual(pageFromBrowser, fallbackPage);
 
-    (collector as any).browser = {
+    collector.browser = {
       isConnected: () => true,
+      on: () => undefined,
       pages: async () => [],
+      version: async () => 'Chrome/131',
     };
     const pageFromNew = await collector.getActivePage();
-    assert.strictEqual(pageFromNew, createdPage as any);
+    assert.strictEqual(pageFromNew, createdPage);
+  });
+
+  it('prefers externally selected page context over manager state', async () => {
+    const selectedPage = { selected: true, isClosed: () => false };
+    const managerPage = { manager: true, isClosed: () => false };
+    const collector = makeCollector({
+      getCurrentPage: () => managerPage,
+    });
+
+    (
+      collector as unknown as {
+        setPageResolver?: (resolver?: () => unknown | null) => void;
+      }
+    ).setPageResolver?.(() => selectedPage);
+
+    const page = await collector.getActivePage();
+    assert.strictEqual(page, selectedPage);
   });
 
   it('applies URL rule matching and navigation retries', async () => {
@@ -299,7 +509,7 @@ describe('CodeCollector logic', () => {
         }
       },
     };
-    await collector.navigateWithRetry(page as any, 'https://example.com', {}, 3);
+    await collector.navigateWithRetry(page, 'https://example.com', {}, 3);
     assert.strictEqual(attempts, 3);
 
     await assert.rejects(
@@ -309,7 +519,7 @@ describe('CodeCollector logic', () => {
             goto: async () => {
               throw new Error('always fail');
             },
-          } as any,
+          },
           'https://example.com',
           {},
           2,
@@ -323,26 +533,26 @@ describe('CodeCollector logic', () => {
     const collector = makeCollector();
     const metrics = await collector.getPerformanceMetrics({
       evaluate: async () => ({ domContentLoaded: 1, loadComplete: 2 }),
-    } as any);
+    });
     assert.deepStrictEqual(metrics, { domContentLoaded: 1, loadComplete: 2 });
 
     const metadata = await collector.collectPageMetadata({
       evaluate: async () => ({ title: 'x', url: 'https://a.com' }),
-    } as any);
+    });
     assert.strictEqual(metadata.title, 'x');
 
     const emptyMetrics = await collector.getPerformanceMetrics({
       evaluate: async () => {
         throw new Error('boom');
       },
-    } as any);
+    });
     assert.deepStrictEqual(emptyMetrics, {});
 
     const emptyMetadata = await collector.collectPageMetadata({
       evaluate: async () => {
         throw new Error('boom');
       },
-    } as any);
+    });
     assert.deepStrictEqual(emptyMetadata, {});
   });
 
@@ -371,7 +581,7 @@ describe('CodeCollector logic', () => {
     ];
 
     for (const file of files) {
-      (collector as any).collectedFilesCache.set(file.url, file);
+      collector.collectedFilesCache.set(file.url, file);
     }
 
     const summary = collector.getCollectedFilesSummary();
@@ -400,8 +610,13 @@ describe('CodeCollector logic', () => {
 
   it('clears collection counters and exposes browser reference', () => {
     const collector = makeCollector();
-    (collector as any).collectedUrls.add('https://a.js');
-    (collector as any).browser = { connected: true };
+    collector.collectedUrls.add('https://a.js');
+    collector.browser = {
+      isConnected: () => true,
+      on: () => undefined,
+      pages: async () => [],
+      version: async () => 'Chrome/131',
+    };
 
     const before = collector.getCollectionStats();
     assert.strictEqual(before.totalCollected, 1);
@@ -413,7 +628,7 @@ describe('CodeCollector logic', () => {
   });
 
   it('waits dynamic scripts via network-idle or fallback sleep', async () => {
-    const collector = makeCollector() as any;
+    const collector = makeCollector();
 
     let waited = 0;
     await collector.waitForDynamicScripts({
@@ -446,8 +661,8 @@ describe('CodeCollector logic', () => {
       version: async () => 'Chrome/131',
     };
     const page = {
-      setUserAgent: async () => {},
-      goto: async () => {},
+      setUserAgent: async () => undefined,
+      goto: async () => undefined,
     };
     const collector = makeCollector({
       launch: async () => browser,
@@ -457,14 +672,16 @@ describe('CodeCollector logic', () => {
       newPage: async () => page,
     });
 
-    (collector as any).cache = {
-      init: async () => {},
-      clear: async () => {},
+    collector.cache = {
+      init: async () => undefined,
+      clear: async () => undefined,
+      get: async () => null,
+      set: async () => undefined,
       getStats: async () => ({}),
     };
-    (collector as any).compressor = {
-      clearCache: () => {},
-      resetStats: () => {},
+    collector.compressor = {
+      clearCache: () => undefined,
+      resetStats: () => undefined,
       getStats: () => ({}),
       getCacheSize: () => 0,
     };
@@ -473,19 +690,21 @@ describe('CodeCollector logic', () => {
     await collector.createPage('https://example.com');
     await collector.createPage();
 
-    (collector as any).cdpSession = { id: 'x' };
-    (collector as any).cdpListeners = { responseReceived: () => {} };
+    collector.cdpSession = { id: 'x' };
+    collector.cdpListeners = { responseReceived: () => undefined };
     disconnectedHandler?.();
-    assert.strictEqual((collector as any).browser, null);
-    assert.deepStrictEqual((collector as any).cdpListeners, {});
+    assert.strictEqual(collector.browser, null);
+    assert.deepStrictEqual(collector.cdpListeners, {});
 
-    (collector as any).browser = browser;
+    collector.browser = browser;
     await collector.close();
     assert.strictEqual(closeCalls, 1);
   });
 
   it('collect supports smart summary and compression metadata branches', async () => {
-    let responseHandler: ((params: any) => Promise<void>) | undefined;
+    let responseHandler:
+      | ((params: {requestId: string; type: string; response: {url: string; mimeType?: string}}) => Promise<void>)
+      | undefined;
     let navCount = 0;
     const cdp = {
       send: async (cmd: string) => {
@@ -494,15 +713,15 @@ describe('CodeCollector logic', () => {
         }
         return {};
       },
-      on: (_event: string, handler: (params: any) => Promise<void>) => {
+      on: (_event: string, handler: (params: {requestId: string; type: string; response: {url: string; mimeType?: string}}) => Promise<void>) => {
         responseHandler = handler;
       },
-      off: () => {},
-      detach: async () => {},
-    };
-    const page = {
-      setDefaultTimeout: () => {},
-      setUserAgent: async () => {},
+      off: () => undefined,
+      detach: async () => undefined,
+    } as CDPHarness;
+    const page: CollectPageHarness = {
+      setDefaultTimeout: () => undefined,
+      setUserAgent: async () => undefined,
       createCDPSession: async () => cdp,
       goto: async () => {
         navCount += 1;
@@ -515,26 +734,26 @@ describe('CodeCollector logic', () => {
           },
         });
       },
-      close: async () => {},
+      close: async () => undefined,
       evaluate: async () => [],
       url: () => 'https://example.com',
-      waitForNetworkIdle: async () => {},
+      waitForNetworkIdle: async () => undefined,
     };
     const collector = makeCollector({
       newPage: async () => page,
     });
-    (collector as any).MAX_SINGLE_FILE_SIZE = 5;
-    (collector as any).cache = {
+    collector.MAX_SINGLE_FILE_SIZE = 5;
+    collector.cache = {
       get: async () => null,
-      set: async () => {},
-      clear: async () => {},
-      init: async () => {},
+      set: async () => undefined,
+      clear: async () => undefined,
+      init: async () => undefined,
       getStats: async () => ({}),
     };
 
-    (collector as any).smartCollector = {
+    collector.smartCollector = {
       smartCollect: async () => [{ hasEncryption: true, keyPatterns: [] }],
-    };
+    } as unknown as SmartCollectorHarness;
     const summary = await collector.collect({
       url: 'https://example.com',
       includeInline: false,
@@ -544,18 +763,16 @@ describe('CodeCollector logic', () => {
       smartMode: 'summary',
       compress: false,
       dynamicWaitMs: 10,
-    } as any);
+    }) as {summaries?: unknown[]};
     assert.ok('summaries' in summary);
 
-    (collector as any).smartCollector = {
-      smartCollect: async (_page: any, files: any[]) => files,
+    collector.smartCollector = {
+      smartCollect: async (_page: unknown, files: CodeFile[]) => files,
     };
-    (collector as any).compressor = {
+    collector.compressor = {
       shouldCompress: () => true,
-      compressBatch: async (items: any[], opts: any) => {
-        opts.onProgress?.(25);
-        opts.onProgress?.(100);
-        return items.map((item: any) => ({
+      compressBatch: async (items: Array<{url: string; content: string}>) => {
+        return items.map((item) => ({
           url: item.url,
           originalSize: 10,
           compressedSize: 5,
@@ -572,8 +789,8 @@ describe('CodeCollector logic', () => {
       includeDynamic: false,
       compress: true,
       smartMode: 'priority',
-    } as any);
-    assert.strictEqual(compressed.files[0]?.metadata?.compressed, true);
+    });
+    assert.strictEqual((compressed as {files: CodeFile[]}).files[0]?.metadata?.compressed, true);
   });
 
   it('covers service worker, web worker, performance and metadata helper branches', async () => {
@@ -581,7 +798,7 @@ describe('CodeCollector logic', () => {
 
     let evalIndex = 0;
     const swPage = {
-      evaluate: async (_fn: any, url?: string) => {
+      evaluate: async (_fn: unknown, url?: string) => {
         evalIndex += 1;
         if (evalIndex === 1) {
           return [{ url: 'https://example.com/sw.js', scope: '/', state: 'activated' }];
@@ -592,21 +809,21 @@ describe('CodeCollector logic', () => {
         return [];
       },
     };
-    const swFiles = await (collector as any).collectServiceWorkers(swPage as any);
+    const swFiles = await collector.collectServiceWorkers(swPage);
     assert.strictEqual(swFiles.length, 1);
     assert.strictEqual(swFiles[0]?.type, 'service-worker');
 
-    const swFail = await (collector as any).collectServiceWorkers({
+    const swFail = await collector.collectServiceWorkers({
       evaluate: async () => {
         throw new Error('sw fail');
       },
-    } as any);
+    });
     assert.deepStrictEqual(swFail, []);
 
     let wwEval = 0;
     const wwPage = {
       url: () => 'https://example.com/path/',
-      evaluate: async (_fn: any, arg?: string) => {
+      evaluate: async (_fn: unknown, arg?: string) => {
         wwEval += 1;
         if (wwEval === 1) return undefined;
         if (wwEval === 2) return ['worker.js'];
@@ -614,37 +831,37 @@ describe('CodeCollector logic', () => {
         return [];
       },
     };
-    const wwFiles = await (collector as any).collectWebWorkers(wwPage as any);
+    const wwFiles = await collector.collectWebWorkers(wwPage);
     assert.strictEqual(wwFiles[0]?.url, 'https://example.com/path/worker.js');
 
-    const wwFail = await (collector as any).collectWebWorkers({
+    const wwFail = await collector.collectWebWorkers({
       evaluate: async () => {
         throw new Error('ww fail');
       },
       url: () => 'https://example.com',
-    } as any);
+    });
     assert.deepStrictEqual(wwFail, []);
 
     const perf = await collector.getPerformanceMetrics({
       evaluate: async () => ({ domContentLoaded: 1, loadComplete: 2, domInteractive: 3, totalTime: 4 }),
-    } as any);
-    assert.strictEqual((perf as any).totalTime, 4);
+    });
+    assert.strictEqual(perf.totalTime, 4);
     const perfFail = await collector.getPerformanceMetrics({
       evaluate: async () => {
         throw new Error('perf fail');
       },
-    } as any);
+    });
     assert.deepStrictEqual(perfFail, {});
 
     const meta = await collector.collectPageMetadata({
       evaluate: async () => ({ title: 't', url: 'u' }),
-    } as any);
-    assert.strictEqual((meta as any).title, 't');
+    });
+    assert.strictEqual(meta.title, 't');
     const metaFail = await collector.collectPageMetadata({
       evaluate: async () => {
         throw new Error('meta fail');
       },
-    } as any);
+    });
     assert.deepStrictEqual(metaFail, {});
   });
 });

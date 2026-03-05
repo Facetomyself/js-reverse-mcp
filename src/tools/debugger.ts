@@ -17,7 +17,98 @@
 import {zod} from '../third_party/index.js';
 
 import {ToolCategory} from './categories.js';
+import {getJSHookRuntime} from './runtime.js';
 import {defineTool} from './ToolDefinition.js';
+
+const BREAKPOINT_STALL_HINT =
+  'If execution appears stuck: run resume first. If it keeps pausing at the same location, remove_breakpoint and switch to trace_function(pause=false) or hook_function.';
+
+function formatUrlWithSourceMap(url: string, sourceMapURL?: string): string {
+  return sourceMapURL ? `${url} [SourceMap: ${sourceMapURL}]` : url;
+}
+
+function formatStackFrameLocation(
+  frame: {
+    url?: string;
+    scriptId?: string;
+    lineNumber: number;
+    columnNumber: number;
+  },
+  sourceMapURL?: string,
+): string {
+  const location = frame.url
+    ? `${frame.url}:${frame.lineNumber + 1}:${frame.columnNumber + 1}`
+    : `script ${frame.scriptId}:${frame.lineNumber + 1}:${frame.columnNumber + 1}`;
+
+  return sourceMapURL
+    ? `${location} [SourceMap: ${sourceMapURL}]`
+    : location;
+}
+
+function findSourceMapURLByScriptUrl(
+  debugger_: {
+    getScripts(): Array<{url?: string; sourceMapURL?: string}>;
+    getScriptsByUrlPattern?(pattern: string): Array<{
+      url?: string;
+      sourceMapURL?: string;
+    }>;
+    getScriptById?(scriptId: string): {sourceMapURL?: string} | undefined;
+  },
+  url?: string,
+  stackFrames?: Array<{url?: string; scriptId?: string}>,
+): string | undefined {
+  if (!url) {
+    return undefined;
+  }
+  const directMatch = debugger_.getScripts().find((script) => script.url === url);
+  if (directMatch?.sourceMapURL) {
+    return directMatch.sourceMapURL;
+  }
+  const patternMatch = debugger_
+    .getScriptsByUrlPattern?.(url)
+    .find((script) => script.url === url)?.sourceMapURL;
+  if (patternMatch) {
+    return patternMatch;
+  }
+  const stackFrameMatch = stackFrames?.find(
+    (frame) => frame.url === url && frame.scriptId,
+  );
+  if (stackFrameMatch?.scriptId) {
+    return debugger_.getScriptById?.(stackFrameMatch.scriptId)?.sourceMapURL;
+  }
+  return undefined;
+}
+
+const reverseTaskParamsSchema = {
+  taskId: zod.string().optional().describe('Optional reverse task ID for writing durable evidence artifacts.'),
+  taskSlug: zod.string().optional().describe('Optional reverse task slug used when opening the task artifact directory.'),
+  targetUrl: zod.string().optional().describe('Optional target page URL associated with the reverse task.'),
+  goal: zod.string().optional().describe('Optional reverse-engineering goal for the task artifact.'),
+};
+
+type ReverseTaskParams = {
+  taskId?: string;
+  taskSlug?: string;
+  targetUrl?: string;
+  goal?: string;
+};
+
+async function appendDebuggerEvidence(
+  params: ReverseTaskParams,
+  entry: Record<string, unknown>,
+): Promise<void> {
+  if (!params.taskId || !params.taskSlug || !params.targetUrl || !params.goal) {
+    return;
+  }
+  const runtime = getJSHookRuntime();
+  const task = await runtime.reverseTaskStore.openTask({
+    taskId: params.taskId,
+    slug: params.taskSlug,
+    targetUrl: params.targetUrl,
+    goal: params.goal,
+  });
+  await task.appendLog('runtime-evidence', entry);
+}
 
 /**
  * List all loaded JavaScript scripts in the current page.
@@ -606,6 +697,7 @@ export const setBreakpoint = defineTool({
           `- Resolved to ${breakpointInfo.locations.length} location(s)`,
         );
       }
+      response.appendResponseLine(`- Tip: ${BREAKPOINT_STALL_HINT}`);
     } catch (error) {
       response.appendResponseLine(
         `Error setting breakpoint: ${error instanceof Error ? error.message : String(error)}`,
@@ -727,9 +819,11 @@ export const getRequestInitiator = defineTool({
       .describe(
         'The request ID (from list_network_requests) to get the initiator for.',
       ),
+    ...reverseTaskParamsSchema,
   },
   handler: async (request, response, context) => {
     const {requestId} = request.params;
+    const debugger_ = context.debuggerContext;
 
     try {
       const httpRequest = context.getNetworkRequestById(requestId);
@@ -751,7 +845,14 @@ export const getRequestInitiator = defineTool({
       response.appendResponseLine(`Type: ${initiator.type}`);
 
       if (initiator.url) {
-        response.appendResponseLine(`URL: ${initiator.url}`);
+        const initiatorSourceMapURL = findSourceMapURLByScriptUrl(
+          debugger_,
+          initiator.url,
+          initiator.stack?.callFrames,
+        );
+        response.appendResponseLine(
+          `URL: ${formatUrlWithSourceMap(initiator.url, initiatorSourceMapURL)}`,
+        );
       }
       if (initiator.lineNumber !== undefined) {
         response.appendResponseLine(`Line: ${initiator.lineNumber + 1}`);
@@ -765,9 +866,10 @@ export const getRequestInitiator = defineTool({
         for (let i = 0; i < initiator.stack.callFrames.length; i++) {
           const frame = initiator.stack.callFrames[i];
           const functionName = frame.functionName || '(anonymous)';
-          const location = frame.url
-            ? `${frame.url}:${frame.lineNumber + 1}:${frame.columnNumber + 1}`
-            : `script ${frame.scriptId}:${frame.lineNumber + 1}:${frame.columnNumber + 1}`;
+          const script = frame.scriptId
+            ? debugger_.getScriptById(frame.scriptId)
+            : undefined;
+          const location = formatStackFrameLocation(frame, script?.sourceMapURL);
           response.appendResponseLine(
             `  ${i + 1}. ${functionName} @ ${location}`,
           );
@@ -782,15 +884,33 @@ export const getRequestInitiator = defineTool({
           for (let i = 0; i < initiator.stack.parent.callFrames.length; i++) {
             const frame = initiator.stack.parent.callFrames[i];
             const functionName = frame.functionName || '(anonymous)';
-            const location = frame.url
-              ? `${frame.url}:${frame.lineNumber + 1}:${frame.columnNumber + 1}`
-              : `script ${frame.scriptId}:${frame.lineNumber + 1}:${frame.columnNumber + 1}`;
+            const script = frame.scriptId
+              ? debugger_.getScriptById(frame.scriptId)
+              : undefined;
+            const location = formatStackFrameLocation(frame, script?.sourceMapURL);
             response.appendResponseLine(
               `  ${i + 1}. ${functionName} @ ${location}`,
             );
           }
         }
       }
+
+      await appendDebuggerEvidence(request.params, {
+        tool: 'get_request_initiator',
+        requestId,
+        requestUrl: httpRequest.url(),
+        initiatorType: initiator.type,
+        initiatorUrl: initiator.url,
+        lineNumber: initiator.lineNumber,
+        columnNumber: initiator.columnNumber,
+        callFrames: initiator.stack?.callFrames.map((frame) => ({
+          functionName: frame.functionName || '(anonymous)',
+          url: frame.url,
+          scriptId: frame.scriptId,
+          lineNumber: frame.lineNumber,
+          columnNumber: frame.columnNumber,
+        })) ?? [],
+      });
     } catch (error) {
       response.appendResponseLine(
         `Error getting initiator: ${error instanceof Error ? error.message : String(error)}`,
@@ -856,6 +976,28 @@ export const getPausedInfo = defineTool({
       );
     }
 
+    const autoRecovery = (
+      debugger_ as {
+        getLastAutoRecoveryEvent?: (maxAgeMs?: number) => {
+          breakpointId: string;
+          hitCount: number;
+          actions?: string[];
+          error?: string;
+        } | null;
+      }
+    ).getLastAutoRecoveryEvent?.(60000);
+    if (autoRecovery) {
+      response.appendResponseLine(
+        `Auto-recovery detected: breakpoint ${autoRecovery.breakpointId} hit ${autoRecovery.hitCount} times in a short window.`,
+      );
+      response.appendResponseLine(
+        `Suggestion: move breakpoint to a lower-frequency path or use hook_function/trace_function(pause=false).`,
+      );
+      if (autoRecovery.error) {
+        response.appendResponseLine(`Recovery warning: ${autoRecovery.error}`);
+      }
+    }
+
     response.appendResponseLine('\n📍 Call Stack:');
 
     for (let i = 0; i < pausedState.callFrames.length; i++) {
@@ -863,7 +1005,15 @@ export const getPausedInfo = defineTool({
       const script = debugger_.getScriptById(frame.location.scriptId);
       const url =
         script?.url || frame.url || `script:${frame.location.scriptId}`;
-      const location = `${url}:${frame.location.lineNumber + 1}:${frame.location.columnNumber + 1}`;
+      const location = formatStackFrameLocation(
+        {
+          url,
+          scriptId: frame.location.scriptId,
+          lineNumber: frame.location.lineNumber,
+          columnNumber: frame.location.columnNumber,
+        },
+        script?.sourceMapURL,
+      );
       response.appendResponseLine(
         `  ${i}. ${frame.functionName} @ ${location}`,
       );
@@ -1347,6 +1497,7 @@ export const setBreakpointOnText = defineTool({
       if (condition) {
         response.appendResponseLine(`- Condition: ${condition}`);
       }
+      response.appendResponseLine(`- Tip: ${BREAKPOINT_STALL_HINT}`);
 
       // Show context
       const contextStart = Math.max(0, columnNumber - 50);
@@ -1526,8 +1677,8 @@ export const hookFunction = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const result = await page.evaluate(hookCode);
+      const frame = context.getSelectedFrame();
+      const result = await frame.evaluate(hookCode);
 
       if (result && typeof result === 'object') {
         if ((result as {success: boolean}).success) {
@@ -1593,8 +1744,8 @@ export const unhookFunction = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const result = await page.evaluate(unhookCode);
+      const frame = context.getSelectedFrame();
+      const result = await frame.evaluate(unhookCode);
 
       if (result && typeof result === 'object') {
         if ((result as {success: boolean}).success) {
@@ -1639,8 +1790,8 @@ export const listHooks = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const hooks = (await page.evaluate(listCode)) as Array<{
+      const frame = context.getSelectedFrame();
+      const hooks = (await frame.evaluate(listCode)) as Array<{
         id: string;
         target: string;
       }>;
@@ -1785,8 +1936,8 @@ export const inspectObject = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const result = await page.evaluate(inspectCode);
+      const frame = context.getSelectedFrame();
+      const result = await frame.evaluate(inspectCode);
 
       if (result && typeof result === 'object' && 'error' in result) {
         response.appendResponseLine(`❌ ${(result as {error: string}).error}`);
@@ -1898,8 +2049,8 @@ export const getStorage = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const result = await page.evaluate(storageCode);
+      const frame = context.getSelectedFrame();
+      const result = await frame.evaluate(storageCode);
 
       response.appendResponseLine(
         `Storage data${filter ? ` (filter: "${filter}")` : ''}:\n`,
@@ -2037,6 +2188,7 @@ export const monitorEvents = defineTool({
       .string()
       .optional()
       .describe('Custom ID for this monitor. Used to stop monitoring later.'),
+    ...reverseTaskParamsSchema,
   },
   handler: async (request, response, context) => {
     const {selector, events, monitorId} = request.params;
@@ -2111,12 +2263,19 @@ export const monitorEvents = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const result = await page.evaluate(monitorCode);
+      const frame = context.getSelectedFrame();
+      const result = await frame.evaluate(monitorCode);
 
       if (result && typeof result === 'object') {
         if ((result as {success: boolean}).success) {
           const r = result as {monitorId: string; eventCount: number};
+          await appendDebuggerEvidence(request.params, {
+            tool: 'monitor_events',
+            monitorId: r.monitorId,
+            selector,
+            eventCount: r.eventCount,
+            events: events || defaultEvents,
+          });
           response.appendResponseLine(`✅ Event monitor started!`);
           response.appendResponseLine(`- Monitor ID: ${r.monitorId}`);
           response.appendResponseLine(`- Target: ${selector}`);
@@ -2177,8 +2336,8 @@ export const stopMonitor = defineTool({
 `;
 
     try {
-      const page = context.getSelectedPage();
-      const result = await page.evaluate(stopCode);
+      const frame = context.getSelectedFrame();
+      const result = await frame.evaluate(stopCode);
 
       if (result && typeof result === 'object') {
         if ((result as {success: boolean}).success) {
@@ -2241,6 +2400,7 @@ export const traceFunction = defineTool({
       .string()
       .optional()
       .describe('Custom ID for this trace. Used to identify in logs.'),
+    ...reverseTaskParamsSchema,
   },
   handler: async (request, response, context) => {
     const debugger_ = context.debuggerContext;
@@ -2369,6 +2529,18 @@ export const traceFunction = defineTool({
         columnNumber,
         condition,
       );
+
+      await appendDebuggerEvidence(request.params, {
+        tool: 'trace_function',
+        traceId: id,
+        functionName,
+        breakpointId: breakpointInfo.breakpointId,
+        location: `${url}:${match.lineNumber + 1}:${columnNumber}`,
+        mode: pause ? 'pause' : 'log',
+        urlFilter: urlFilter ?? null,
+        logArgs,
+        logThis,
+      });
 
       response.appendResponseLine(`✅ Function trace installed!`);
       response.appendResponseLine(`- Trace ID: ${id}`);

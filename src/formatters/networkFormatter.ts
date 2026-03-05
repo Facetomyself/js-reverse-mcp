@@ -9,6 +9,7 @@ import {isUtf8} from 'node:buffer';
 import type {HTTPRequest, HTTPResponse} from '../third_party/index.js';
 
 const BODY_CONTEXT_SIZE_LIMIT = 10000;
+const BODY_READ_TIMEOUT_MS = 3000;
 
 export function getShortDescriptionForRequest(
   request: HTTPRequest,
@@ -50,9 +51,15 @@ export function getFormattedHeaderValue(
 export async function getFormattedResponseBody(
   httpResponse: HTTPResponse,
   sizeLimit = BODY_CONTEXT_SIZE_LIMIT,
+  timeoutMs = BODY_READ_TIMEOUT_MS,
 ): Promise<string | undefined> {
   try {
-    const responseBuffer = await httpResponse.buffer();
+    const responseBuffer = await Promise.race([
+      httpResponse.buffer(),
+      new Promise<Buffer>((_, reject) => {
+        setTimeout(() => reject(new Error('timeout')), timeoutMs);
+      }),
+    ]);
 
     if (isUtf8(responseBuffer)) {
       const responseAsTest = responseBuffer.toString('utf-8');
@@ -65,7 +72,10 @@ export async function getFormattedResponseBody(
     }
 
     return `<binary data>`;
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === 'timeout') {
+      return `<timed out while reading response body>`;
+    }
     return `<not available anymore>`;
   }
 }

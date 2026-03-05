@@ -1,9 +1,16 @@
+
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import {zod} from '../third_party/index.js';
-import {defineTool} from './ToolDefinition.js';
+
 import {ToolCategory} from './categories.js';
 import {getJSHookRuntime} from './runtime.js';
+import {defineTool} from './ToolDefinition.js';
 
-type NormalizedHookRecord = {
+interface NormalizedHookRecord {
   target: string;
   event: string;
   method: string;
@@ -11,7 +18,7 @@ type NormalizedHookRecord = {
   status?: number;
   bodySnippet: string;
   timestamp?: number;
-};
+}
 
 function normalizeHookRecord(record: Record<string, unknown>): NormalizedHookRecord {
   const body = typeof record.body === 'string'
@@ -37,13 +44,13 @@ function normalizeRecordForDedupe(record: NormalizedHookRecord): {key: string; s
   return {key, summary: record};
 }
 
-function summarizeHookRecords(records: Array<NormalizedHookRecord>, maxRecords: number): {
+function summarizeHookRecords(records: NormalizedHookRecord[], maxRecords: number): {
   total: number;
   unique: number;
   dropped: number;
   records: Array<Record<string, unknown>>;
 } {
-  const byKey = new Map<string, {count: number; sample: Record<string, unknown>}>();
+  const byKey = new Map<string, {count: number; sample: NormalizedHookRecord}>();
   for (const record of records) {
     const normalized = normalizeRecordForDedupe(record);
     const existing = byKey.get(normalized.key);
@@ -55,7 +62,7 @@ function summarizeHookRecords(records: Array<NormalizedHookRecord>, maxRecords: 
   }
 
   const deduped = Array.from(byKey.values()).map((item) => ({
-    ...item.sample,
+    ...(item.sample as unknown as Record<string, unknown>),
     count: item.count,
   }));
   deduped.sort((a, b) => Number(b.count) - Number(a.count));
@@ -66,6 +73,97 @@ function summarizeHookRecords(records: Array<NormalizedHookRecord>, maxRecords: 
     dropped: deduped.length - limited.length,
     records: limited,
   };
+}
+
+function inferCandidateEnvNeeds(records: NormalizedHookRecord[]): string[] {
+  const needs = new Set<string>();
+  for (const record of records) {
+    if (record.url.startsWith('http://') || record.url.startsWith('https://')) {
+      needs.add('location');
+      needs.add('fetch');
+    }
+    if (record.bodySnippet.includes('token') || record.bodySnippet.includes('cookie')) {
+      needs.add('cookie');
+      needs.add('storage');
+    }
+    if (record.bodySnippet.includes('nonce') || record.bodySnippet.includes('timestamp')) {
+      needs.add('Date');
+    }
+  }
+  return Array.from(needs).sort();
+}
+
+function buildRequestBindings(records: NormalizedHookRecord[]): Array<Record<string, unknown>> {
+  return records
+    .filter((record) => record.url)
+    .slice(0, 10)
+    .map((record) => ({
+      target: record.target,
+      event: record.event,
+      method: record.method || 'UNKNOWN',
+      url: record.url,
+      status: record.status,
+    }));
+}
+
+function toHookRecordArray(data: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  return data.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
+}
+
+async function syncHookRecordsFromPage(runtime: ReturnType<typeof getJSHookRuntime>, hookId?: string): Promise<void> {
+  type EvaluatingPage = {
+    evaluate: (fn: (id?: string) => unknown, id?: string) => Promise<unknown>;
+  };
+
+  let page: EvaluatingPage | null = null;
+  try {
+    page = await runtime.collector.getActivePage() as unknown as EvaluatingPage;
+  } catch {
+    return;
+  }
+
+  if (!page || typeof page.evaluate !== 'function') {
+    return;
+  }
+
+  const storeSnapshot = await page.evaluate((id?: string) => {
+    const rawStore = (window as typeof window & {__hookStore?: unknown}).__hookStore;
+    const store = rawStore && typeof rawStore === 'object'
+      ? rawStore as Record<string, unknown>
+      : {};
+
+    const normalize = (value: unknown) => Array.isArray(value) ? value : [];
+
+    if (typeof id === 'string' && id.length > 0) {
+      return {[id]: normalize(store[id])};
+    }
+
+    const all: Record<string, unknown[]> = {};
+    for (const [key, value] of Object.entries(store)) {
+      if (Array.isArray(value)) {
+        all[key] = value;
+      }
+    }
+    return all;
+  }, hookId);
+
+  if (!storeSnapshot || typeof storeSnapshot !== 'object') {
+    return;
+  }
+
+  for (const [id, records] of Object.entries(storeSnapshot as Record<string, unknown>)) {
+    runtime.hookManager.clearRecords(id);
+    for (const record of toHookRecordArray(records)) {
+      runtime.hookManager.addRecord(id, {
+        hookId: id,
+        timestamp: typeof record.timestamp === 'number' ? record.timestamp : Date.now(),
+        ...record,
+      });
+    }
+  }
 }
 
 export const createHook = defineTool({
@@ -114,6 +212,7 @@ export const getHookData = defineTool({
   },
   handler: async (request, response) => {
     const runtime = getJSHookRuntime();
+    await syncHookRecordsFromPage(runtime, request.params.hookId);
     const view = request.params.view ?? 'raw';
     const maxRecords = request.params.maxRecords ?? 100;
     let data: unknown;
@@ -121,7 +220,11 @@ export const getHookData = defineTool({
       const records = (runtime.hookManager.getRecords(request.params.hookId) as Array<Record<string, unknown>>)
         .map(normalizeHookRecord);
       data = view === 'summary'
-        ? summarizeHookRecords(records, maxRecords)
+        ? {
+            ...summarizeHookRecords(records, maxRecords),
+            candidateEnvNeeds: inferCandidateEnvNeeds(records),
+            requestBindings: buildRequestBindings(records),
+          }
         : records;
     } else if (view === 'summary') {
       const hooks = runtime.hookManager.getAllHooks();
@@ -131,6 +234,8 @@ export const getHookData = defineTool({
         return {
           hookId: hook.hookId,
           ...summarizeHookRecords(records, maxRecords),
+          candidateEnvNeeds: inferCandidateEnvNeeds(records),
+          requestBindings: buildRequestBindings(records),
         };
       });
     } else {

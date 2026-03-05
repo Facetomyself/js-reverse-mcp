@@ -361,4 +361,8 @@ export class BrowserModeManager {
   getCurrentPage(): Page | null {
     return this.currentPage;
   }
+
+  setCurrentPage(page: Page | null): void {
+    this.currentPage = page;
+  }
 }

@@ -1,18 +1,29 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
+import { AIService } from '../../../src/services/AIService.js';
+import type { AIMessage, AIProvider, ChatOptions } from '../../../src/services/AIService.js';
 import { LLMService } from '../../../src/services/LLMService.js';
 
 describe('LLMService prompt generation', () => {
   it('calls configured chat service with mapped options', async () => {
-    let captured: any = null;
+    let capturedMessages: AIMessage[] | undefined;
+    let capturedOptions: ChatOptions | undefined;
+    const provider: AIProvider = {
+      chat: async (messages: AIMessage[], options?: ChatOptions) => {
+        capturedMessages = messages;
+        capturedOptions = options;
+        return { content: 'ok', usage: undefined };
+      },
+      analyzeImage: async () => '',
+    };
     const service = new LLMService(
-      () =>
-        ({
-          chat: async (messages: any, options: any) => {
-            captured = { messages, options };
-            return { content: 'ok', usage: undefined };
-          },
-        }) as any,
+      () => new AIService(provider),
     );
 
     const result = await service.chat(
@@ -21,7 +32,10 @@ describe('LLMService prompt generation', () => {
     );
 
     assert.strictEqual(result.content, 'ok');
-    assert.deepStrictEqual(captured.options, { temperature: 0.2, maxTokens: 123 });
+    if (!capturedMessages) {
+      throw new Error('Expected chat call to be captured');
+    }
+    assert.deepStrictEqual(capturedOptions, { temperature: 0.2, maxTokens: 123 });
   });
 
   it('throws when no chat service is available', async () => {

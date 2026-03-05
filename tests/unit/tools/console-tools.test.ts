@@ -1,8 +1,69 @@
-import { describe, it } from 'node:test';
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+
+import { setIssuesEnabled } from '../../../src/features.js';
 import { zod } from '../../../src/third_party/index.js';
 import { getConsoleMessage, listConsoleMessages } from '../../../src/tools/console.js';
-import { setIssuesEnabled } from '../../../src/features.js';
+
+interface ConsoleIncludeOptions {
+  pageSize?: number;
+  pageIdx?: number;
+  types?: Array<
+    | 'log'
+    | 'debug'
+    | 'info'
+    | 'error'
+    | 'warn'
+    | 'dir'
+    | 'dirxml'
+    | 'table'
+    | 'trace'
+    | 'clear'
+    | 'startGroup'
+    | 'startGroupCollapsed'
+    | 'endGroup'
+    | 'assert'
+    | 'profile'
+    | 'profileEnd'
+    | 'count'
+    | 'timeEnd'
+    | 'verbose'
+    | 'issue'
+  >;
+  includePreservedMessages?: boolean;
+}
+
+interface ConsoleResponseHarness {
+  setIncludeConsoleData(value: boolean, options?: ConsoleIncludeOptions): void;
+  appendResponseLine(value: string): void;
+  setIncludePages(value: boolean): void;
+  setIncludeNetworkRequests(value: boolean): void;
+  attachImage(value: unknown): void;
+  attachNetworkRequest(reqid: number): void;
+  attachConsoleMessage(msgid: number): void;
+  setIncludeWebSocketConnections(value: boolean): void;
+  attachWebSocket(wsid: number): void;
+}
+
+interface ListConsoleRequestHarness {
+  params: {
+    pageSize?: number;
+    pageIdx?: number;
+    types?: ConsoleIncludeOptions['types'];
+    includePreservedMessages?: boolean;
+  };
+}
+
+interface GetConsoleRequestHarness {
+  params: {
+    msgid: number;
+  };
+}
 
 describe('console tools', () => {
   it('lists console messages with filters and defaults', async () => {
@@ -10,25 +71,30 @@ describe('console tools', () => {
     const parsed = schema.parse({ pageSize: 20, pageIdx: 1, types: ['error'] });
 
     let include = false;
-    let options: any;
-    const response = {
-      setIncludeConsoleData: (value: boolean, opts?: any) => {
+    let options: ConsoleIncludeOptions | undefined;
+    const response: ConsoleResponseHarness = {
+      setIncludeConsoleData: (value: boolean, opts?: ConsoleIncludeOptions) => {
         include = value;
         options = opts;
       },
-      appendResponseLine: () => {},
-      setIncludePages: () => {},
-      setIncludeNetworkRequests: () => {},
-      attachImage: () => {},
-      attachNetworkRequest: () => {},
-      attachConsoleMessage: () => {},
-      setIncludeWebSocketConnections: () => {},
-      attachWebSocket: () => {},
+      appendResponseLine: () => undefined,
+      setIncludePages: () => undefined,
+      setIncludeNetworkRequests: () => undefined,
+      attachImage: () => undefined,
+      attachNetworkRequest: () => undefined,
+      attachConsoleMessage: () => undefined,
+      setIncludeWebSocketConnections: () => undefined,
+      attachWebSocket: () => undefined,
     };
 
-    await listConsoleMessages.handler({ params: parsed } as any, response as any, {} as any);
+    await listConsoleMessages.handler(
+      { params: parsed } as unknown as ListConsoleRequestHarness,
+      response as unknown as Parameters<typeof listConsoleMessages.handler>[1],
+      {} as Parameters<typeof listConsoleMessages.handler>[2],
+    );
 
     assert.strictEqual(include, true);
+    assert.ok(options);
     assert.strictEqual(options.pageSize, 20);
     assert.strictEqual(options.pageIdx, 1);
     assert.deepStrictEqual(options.types, ['error']);
@@ -37,21 +103,25 @@ describe('console tools', () => {
 
   it('attaches single console message by msgid', async () => {
     let attached: number | undefined;
-    const response = {
+    const response: ConsoleResponseHarness = {
       attachConsoleMessage: (id: number) => {
         attached = id;
       },
-      appendResponseLine: () => {},
-      setIncludeConsoleData: () => {},
-      setIncludePages: () => {},
-      setIncludeNetworkRequests: () => {},
-      attachImage: () => {},
-      attachNetworkRequest: () => {},
-      setIncludeWebSocketConnections: () => {},
-      attachWebSocket: () => {},
+      appendResponseLine: () => undefined,
+      setIncludeConsoleData: () => undefined,
+      setIncludePages: () => undefined,
+      setIncludeNetworkRequests: () => undefined,
+      attachImage: () => undefined,
+      attachNetworkRequest: () => undefined,
+      setIncludeWebSocketConnections: () => undefined,
+      attachWebSocket: () => undefined,
     };
 
-    await getConsoleMessage.handler({ params: { msgid: 42 } } as any, response as any, {} as any);
+    await getConsoleMessage.handler(
+      { params: { msgid: 42 } } as unknown as GetConsoleRequestHarness,
+      response as unknown as Parameters<typeof getConsoleMessage.handler>[1],
+      {} as Parameters<typeof getConsoleMessage.handler>[2],
+    );
     assert.strictEqual(attached, 42);
   });
 
