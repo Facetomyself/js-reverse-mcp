@@ -86,7 +86,7 @@
 | `navigate_page` | BrowserManager pages | 当前页选择/导航 | BrowserManager currentPage |
 | `new_page` | BrowserManager pages | 当前页选择/导航 | BrowserManager currentPage |
 | `select_page` | BrowserManager pages | 当前页选择/导航 | BrowserManager currentPage |
-| `diff_env_requirements` | 运行时失败信息 + 页面能力 + 证据输入 | rebuild bundle/task artifacts | Artifacts |
+| `diff_env_requirements` | 运行时失败信息 + 页面能力 + 证据输入（辅助补环境，不替代代理日志） | rebuild bundle/task artifacts | Artifacts |
 | `export_rebuild_bundle` | 请求参数 + 当前上下文 | task artifact 文件 | `artifacts/tasks/*` |
 | `take_screenshot` | 页面/元素渲染 | 截图文件或响应附件 | filesystem(optional) |
 | `evaluate_script` | 当前 frame runtime | 页面注入脚本 | PreloadScript Registry |

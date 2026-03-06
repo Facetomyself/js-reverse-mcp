@@ -31,16 +31,22 @@
 2. Capture
 - 最小采样（优先 Hook，必要时断点），只保留字段结构证据。
 3. Rebuild
-- 本地最小补环境（按缺口单变量补丁），禁止一次性脑补。
+- 本地最小补环境：先读代理 env log，先记录 `first divergence`，再按最小因果单元补丁，禁止一次性脑补。
 4. Verify
 - 单次验签闭环，记录状态码、业务码、响应摘要。
 5. Divergence
 - 记录 first divergence（首个差异点）并给出下一步补丁方向。
 
-## 3. 补环境策略（单变量）
-- 每次仅补一类能力：
-  - `navigator` / `location` / `document` / `storage` / `canvas|webgl` / `crypto` / `Date`
-- 每次补丁后立刻复测并记录变化。
+## 3. 补环境策略（最小因果单元）
+- 每次只做一个补丁决策，而不是机械地一次改一个属性名。
+- 一个补丁决策可对应：
+  - 一个值 / 一个函数壳 / 一个返回对象 / 一个最小对象契约
+- 补丁前必须先确认：
+  - 当前代理 env log
+  - 当前 `first divergence`
+  - 对应页面证据
+- `diff_env_requirements` 仅作辅助，不替代代理日志。
+- 每次补丁后立刻复测并记录 `first divergence` 是否前移。
 - 失败时使用“上一版本可用快照”回退。
 
 ## 4. 验证口径
@@ -55,6 +61,8 @@
 - `paramShape`: 段数、长度、编码规则
 - `requiredInputs`: 复现所需最小输入字段
 - `envDependencies`: 补环境依赖清单
+- `proxyLogSummary`: 当前代理日志摘要
+- `patchDecision`: 当前最小因果单元补丁决策
 - `verifyResult`: 状态码、业务摘要
 - `firstDivergence`: 首差异与后续动作
 

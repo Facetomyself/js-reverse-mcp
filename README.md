@@ -47,63 +47,188 @@
 
 ### 页面观察与脚本定位
 
-- `list_scripts`
-- `get_script_source`
-- `find_in_script`
-- `search_in_scripts`
+先回答“页面里有哪些脚本、目标代码大概在哪”。
+
+- `list_scripts`：列出当前页面已加载的脚本，先建立脚本范围。
+- `get_script_source`：查看指定脚本源码，适合继续阅读具体实现。
+- `find_in_script`：在单个脚本里定位字符串、变量名或特征片段。
+- `search_in_scripts`：在已采集脚本缓存中批量搜索，适合缩小候选脚本范围。
 
 ### Hook 与运行时采样
 
-- `create_hook`
-- `inject_hook`
-- `get_hook_data`
-- `hook_function`
-- `trace_function`
+先做最小侵入式观测，确认运行时到底调用了什么。
+
+- `create_hook`：创建可复用的 hook 定义，用于后续注入页面。
+- `inject_hook`：把已有 hook 注入当前页面，开始采样目标行为。
+- `get_hook_data`：读取 hook 采集到的调用记录和摘要结果。
+- `hook_function`：直接 hook 全局函数或对象方法，记录参数和返回值。
+- `trace_function`：按源码函数名做调用追踪，适合跟调用链。
 
 ### 断点与调试控制
 
-- `set_breakpoint`
-- `set_breakpoint_on_text`
-- `resume`
-- `pause`
-- `step_over` / `step_into` / `step_out`
+当 hook 不够时，再进入暂停式调试。
+
+- `set_breakpoint`：按脚本 URL 和行号设置断点。
+- `set_breakpoint_on_text`：按代码文本自动定位并设置断点。
+- `resume`：继续执行到下一个断点或执行结束。
+- `pause`：手动暂停当前页面的 JavaScript 执行。
+- `step_over` / `step_into` / `step_out`：单步控制执行路径，分别对应跳过、进入、跳出函数。
 
 ### 请求链路与网络分析
 
-- `list_network_requests`
-- `get_network_request`
-- `get_request_initiator`
-- `break_on_xhr`
+定位目标请求，确认是谁发起、带了什么参数。
+
+- `list_network_requests`：列出当前页面的网络请求，先找到目标请求。
+- `get_network_request`：查看单个请求的详细内容，包括请求头、响应和载荷。
+- `get_request_initiator`：追溯某个请求是谁触发的，帮助定位调用链。
+- `break_on_xhr`：在目标请求发出时中断，适合抓参数生成前的现场。
+
+### 页面状态与运行前检查
+
+补看页面运行状态、控制台输出和本地状态依赖。
+
+- `check_browser_health`：检查浏览器连接和当前页是否可控，适合作为起手验证。
+- `list_console_messages`：查看当前页面 console 输出，适合回看 hook 和 trace 日志。
+- `get_storage`：读取 cookie、`localStorage`、`sessionStorage`，确认状态依赖。
+- `evaluate_script`：在当前选中 frame 内执行一段函数，做小范围运行时验证。
+- `search_in_sources`：在所有已加载源码中搜索关键字，快速缩小可疑代码范围。
+
+### WebSocket 观察与消息分组
+
+处理长连接、直播流或二进制帧时，用这组工具先分流再细看。
+
+- `list_websocket_connections`：列出当前页面的 WebSocket 连接，先拿到目标 `wsid`。
+- `analyze_websocket_messages`：按帧特征做消息分组，适合先识别不同消息类型。
+- `get_websocket_messages`：查看某个连接或某个分组下的消息摘要和内容。
 
 ### 本地复现与补环境
 
+把页面证据带回本地，逐步补齐 Node 运行环境。
+
+- `export_rebuild_bundle`：导出本地复现工程所需的入口、补环境和证据材料。
+- `diff_env_requirements`：根据报错和观测能力比对当前缺失的环境能力。
+- `record_reverse_evidence`：把关键观察结果写入 task artifact，避免证据只留在对话里。
+
+### 页面自动化
+
+做最小必要的页面操作，复现触发条件并辅助取证。
+
+- `navigate_page`：跳转、回退、刷新当前页面。
+- `query_dom`：查询页面元素，确认选择器和节点状态。
+- `click_element`：按选择器触发点击，复现页面动作。
+- `type_text`：向输入框写入文本，驱动表单交互。
+- `take_screenshot`：截取页面当前状态，保留可视化证据。
+
+### 深度分析
+
+在拿到代码和运行时证据后，继续做结构理解与去混淆。
+
+- `collect_code`：采集页面代码，支持按优先级或范围控制采样量。
+- `understand_code`：结合静态分析和 AI 做代码结构、业务逻辑与风险理解。
+- `deobfuscate_code`：对混淆代码做清理、还原和辅助分析。
+- `risk_panel`：聚合代码分析、加密检测和 hook 信号，输出综合风险视图。
+
+### 会话与登录态复用
+
+- `save_session_state`：保存当前页面的 cookie 和存储状态到内存快照。
+- `restore_session_state`：把快照恢复到当前页面，复用登录态和现场。
+- `dump_session_state`：把会话快照导出为 JSON 文件，便于持久化。
+- `load_session_state`：从已有 JSON 或字符串重新载入会话快照。
+
+完整参数说明见 [docs/reference/tool-reference.md](docs/reference/tool-reference.md)。
+按逆向流程选工具可继续看 [docs/guides/reverse-workflow.md](docs/guides/reverse-workflow.md)。
+
+
+### 外部 AI 怎么配置
+
+这个项目支持把外部 LLM 作为“分析增强层”接进来，当前支持：
+
+- `openai`
+- `anthropic`
+- `gemini`
+
+配置入口本质上是进程环境变量。  
+通过 MCP 客户端启动时，优先在 MCP server 配置里的 `env` 传入；`.env` 只适合你直接本地运行 `node build/src/index.js` 或 `npm run start` 的场景。
+
+推荐方式示例：
+
+```toml
+[mcp_servers.js-reverse]
+command = "node"
+args = ["/ABSOLUTE/PATH/JSReverser-MCP/build/src/index.js"]
+
+[mcp_servers.js-reverse.env]
+DEFAULT_LLM_PROVIDER = "anthropic"
+ANTHROPIC_API_KEY = "your_key"
+ANTHROPIC_MODEL = "claude-3-5-sonnet-20241022"
+```
+
+如果你是直接在项目目录本地启动，也可以使用 `.env`：
+
+```bash
+# 三选一：openai / anthropic / gemini
+DEFAULT_LLM_PROVIDER=gemini
+
+# OpenAI
+OPENAI_API_KEY=your_key
+OPENAI_MODEL=gpt-4o
+OPENAI_BASE_URL=
+
+# Anthropic / Claude
+ANTHROPIC_API_KEY=your_key
+ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+ANTHROPIC_BASE_URL=
+
+# Gemini
+GEMINI_API_KEY=your_key
+GEMINI_MODEL=gemini-2.0-flash-exp
+
+# 如果不用 API，也可以走本地 CLI
+GEMINI_CLI_PATH=gemini-cli
+```
+
+说明：
+
+- `DEFAULT_LLM_PROVIDER` 决定默认走哪个 provider
+- `gemini` 支持两种模式：有 `GEMINI_API_KEY` 时走 API；没有时会尝试走 `GEMINI_CLI_PATH`
+- `openai` 和 `anthropic` 需要对应 API key
+- 如果你配了多个 provider，实际使用哪个，仍由 `DEFAULT_LLM_PROVIDER` 决定
+
+### 哪些功能依赖外部 AI
+
+强依赖外部 AI 的功能：
+
+- `understand_code`
+  - 内部会调用 LLM 做代码语义理解、业务逻辑提取、安全风险补充
+
+可选启用外部 AI 的功能：
+
+- `detect_crypto`
+  - 只有传 `useAI=true` 时才会额外调用 LLM；不传时主要依赖本地规则和 AST 分析
+- `analyze_target`
+  - 传 `useAI=true` 时会在一站式分析里启用更深的 AI 辅助分析
+- `risk_panel`
+  - 参数里有 `useAI`，但当前实现主体仍以本地分析结果聚合为主
+
+有 AI 时效果更好，但不配也能运行的功能：
+
+- `deobfuscate_code`
+  - 本地规则、AST 优化、专项反混淆管线始终可用；配置外部 AI 后，复杂语义清理、VM 结构理解、部分编码型混淆降级分析会更完整
+
+完全不依赖外部 AI 的功能：
+
+- 浏览器接管
+- Hook / 断点 / Console / Storage / Network / WebSocket
+- `collect_code`
 - `export_rebuild_bundle`
 - `diff_env_requirements`
 - `record_reverse_evidence`
 
-### 页面自动化
+如果没配外部 AI，典型影响是：
 
-- `navigate_page`
-- `query_dom`
-- `click_element`
-- `type_text`
-- `take_screenshot`
-
-### 深度分析
-
-- `collect_code`
-- `understand_code`
-- `deobfuscate_code`
-- `risk_panel`
-
-### 会话与登录态复用
-
-- `save_session_state`
-- `restore_session_state`
-- `dump_session_state`
-- `load_session_state`
-
-完整参数说明见 [docs/reference/tool-reference.md](docs/reference/tool-reference.md)。
+- `understand_code` 会直接报 provider 未配置
+- `detect_crypto(useAI=true)` 会退回本地分析或忽略 AI 增强
+- `deobfuscate_code` 仍可跑，但某些高难度混淆的解释和清理质量会下降
 
 ## 标准任务结构
 
@@ -227,6 +352,15 @@ args = ["/ABSOLUTE/PATH/JSReverser-MCP/build/src/index.js"]
 
 - [docs/guides/browser-connection.md](docs/guides/browser-connection.md)
 - [docs/guides/client-configuration.md](docs/guides/client-configuration.md)
+
+完整可直接复制的 MCP 配置实例，包括：
+
+- `mcpServers` JSON 结构示例
+- Codex `config.toml` 示例
+- `--browserUrl` 接管浏览器示例
+- Gemini / Claude / OpenAI 的 API `env` 示例
+
+都放在 [docs/guides/client-configuration.md](docs/guides/client-configuration.md)。
 
 ## 文档入口
 

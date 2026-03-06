@@ -14,9 +14,12 @@
 1. 在页面里确认目标请求、脚本、函数
 2. 导出本地复现包
 3. 运行 `env/entry.js`
-4. 根据报错调用 `diff_env_requirements`
-5. 一次补一个环境项
-6. 补丁写回 task artifact
+4. 优先读取代理 env log
+5. 记录当前 `first divergence`
+6. 按“最小因果单元”做一个补丁决策
+7. 必要时再用 `diff_env_requirements` 做辅助比对
+8. 复跑并确认 `first divergence` 是否前移
+9. 补丁写回 task artifact
 
 优先补：
 
@@ -28,4 +31,4 @@
 - `crypto`
 - `fetch/XMLHttpRequest`
 
-不要在没有页面证据的情况下大量脑补环境。
+不要在没有页面证据、没有代理 env log、没有 `first divergence` 记录的情况下大量脑补环境。

@@ -11,6 +11,7 @@
 - 参数名：`<param_name>`
 - 常见入口：`<entry_function_or_class>`
 - 相关脚本：`<script_url_pattern>`
+- 入口页面 / host：`<entry_url_b64 | api_host_b64>`
 
 ## 2. 请求映射
 - 目标接口模式：
@@ -48,7 +49,8 @@
 ## 6. 回归清单
 - 脚本版本变化后是否仍满足输出契约？
 - `requiredInputs` 是否新增/删除？
-- first divergence 是否变化？
+- 代理 env log 的首个异常路径是否变化？
+- first divergence 是否变化或前移？
 
 ## 7. 关联文档
 - 方法论模板：`docs/reference/parameter-methodology-template.md`

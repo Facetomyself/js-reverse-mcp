@@ -24,11 +24,12 @@
 - 采集最小种子：仅保留签名必要字段，严禁全量敏感导出。
 3. Rebuild
 - Node `vm` 补最小浏览器能力：`window/document/navigator/storage/canvas`。
+- 先用代理 env log 定位缺口，再按 `first divergence` 约束补丁边界。
 - 不暴露 `process` 等 Node 特征到 `vm`。
 4. Verify
 - 生成签名后立即发一次验签请求（闭环），以服务端响应为最终判据。
 5. Harden
-- 记录 first divergence（首个差异点），按“单变量补丁”迭代。
+- 记录 first divergence（首个差异点），按“最小因果单元补丁”迭代；`diff_env_requirements` 仅作辅助。
 
 ## 输出契约
 - `signature_parts_count`

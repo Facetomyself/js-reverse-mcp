@@ -7,7 +7,7 @@
 - 先取证，再补环境
 - 最小宿主，逐项回填
 - 代理诊断优先，盲补禁止
-- 每次补丁都要能追溯到页面证据或本地报错
+- 每次补丁都要能追溯到代理日志、first divergence 与页面证据
 
 ## 两阶段目标
 
@@ -103,19 +103,25 @@
 
 ### 4. 按缺口逐项回填
 
-回填时只允许补当前链路缺失的最小项。
+回填时只允许补当前 `first divergence` 对应的最小因果单元，而不是机械地一项项打地鼠。
 
-补丁类型固定为三类：
+一个补丁决策允许覆盖以下四类最小因果单元：
 
 - 缺基础值：直接补常量，如 `navigator.userAgent`
 - 缺函数壳：用 `makeFunction("createElement")`
 - 缺返回对象：补最小返回结构，如 `document.createElement()` 的返回对象
+- 缺最小对象契约：只补该对象当前链路不可分割的最小接口集，如 `localStorage.getItem/setItem/removeItem`
+
+这里的“一次补一项”指的是“一次只做一个补丁决策”，而不是“永远只改一个属性名”。
+如果代理日志和 `first divergence` 已经证明当前缺口是同一个最小对象契约，可以一起补完该契约；
+如果只是看到多个零散访问，但还没有确认同属一个因果单元，就仍然只补当前最先阻塞执行的那一项。
 
 每次补丁都应该满足：
 
-- 能指出来源于哪条页面证据或哪条本地错误
-- 能说明为什么只补这一项
+- 能指出来源于哪条代理日志、哪条 `first divergence` 记录，以及哪条页面证据
+- 能说明为什么只补这一项或这一个最小对象契约
 - 补完后立刻复测
+- 如果没有代理日志或没有 `first divergence` 记录，则不允许补丁
 
 ## 补丁判定表
 
@@ -125,6 +131,8 @@
 | `document.createElement is not a function` | 函数壳缺失 | 先用 `makeFunction("createElement")` 挂函数壳 | 不要直接补完整 DOM 实现 |
 | `Cannot read properties of undefined (reading 'style')` 且前一步刚调用了 `createElement()` | 返回对象结构缺失 | 给该函数补最小返回对象 | 不要把无关字段一并补全 |
 | `localStorage.getItem is not a function` | 宿主对象方法缺失 | 补 storage shim 的最小方法集 | 不要引入站点私有缓存值 |
+| 同一对象连续出现多个接口缺失，且都指向同一 first divergence | 最小对象契约缺失 | 一次补该对象的最小接口集 | 不要顺手扩成完整浏览器对象 |
+| `Illegal invocation` / brand check 失败 | 宿主建模方式错误 | 先修对象形态或 this 绑定，再决定是否补值 | 不要把 brand-sensitive 对象直接套 Proxy 乱包 |
 | `crypto.subtle` / `TextEncoder` 缺失 | 平台 API 缺失 | 补最小平台 API 外壳或 polyfill | 不要臆造算法结果 |
 
 ## 负面示例
@@ -178,17 +186,22 @@
 
 ## 推荐判断顺序
 
-1. 先看本地报错
-2. 对照代理诊断日志定位缺口路径
-3. 回到页面证据确认真实来源
-4. 只补当前链路最小所需对象
-5. 立即重跑 `env/entry.js`
+1. 先跑一次 `env/entry.js`
+2. 先看本地报错
+3. 再读代理诊断日志，定位首个异常访问
+4. 记录并确认当前 `first divergence`
+5. 回到页面证据确认真实来源
+6. 只补当前 `first divergence` 对应的最小因果单元
+7. 必要时再用 `diff_env_requirements` 做辅助比对，而不是替代代理日志
+8. 立即重跑 `env/entry.js`
 
 ## 禁止事项
 
 - 不要猜环境
 - 不要一次性全量模拟浏览器
 - 不要没有页面证据就补 cookie / storage / header / UA
+- 不要没有代理日志和 `first divergence` 记录就补宿主
+- 不要把 `diff_env_requirements` 当成第一依据，跳过代理日志直接补
 - 不要把补环境逻辑直接塞进 MCP 核心运行时
 
 ## 产物要求

@@ -8,7 +8,7 @@
 2. 运行时采样
 3. task artifact 记录
 4. local rebuild
-5. 本地补环境
+5. 本地补环境（代理日志优先）
 
 读取优先级（强制）：
 
@@ -69,6 +69,14 @@
 
 适合在页面里确认请求链路后，导出 `env/entry.js`、`env/env.js`、`env/polyfills.js`、`env/capture.json` 做 local rebuild。
 
+固定顺序：
+
+1. 先运行 `env/entry.js`
+2. 先读 task-local 代理 env log
+3. 记录当前 `first divergence`
+4. 再按“最小因果单元”决定补丁
+5. 必要时才用 `diff_env_requirements` 做辅助比对
+
 补环境原则请同时参考：`docs/reference/env-patching.md`
 
 ## 6) 评估风险和加密实现
@@ -120,8 +128,10 @@
 7. `get_hook_data`
 8. `record_reverse_evidence`
 9. `export_rebuild_bundle`
-10. `diff_env_requirements`
-11. `risk_panel`
+10. 运行 `env/entry.js` 并读取代理 env log
+11. 记录 `first divergence`
+12. `diff_env_requirements`（仅辅助）
+13. `risk_panel`
 
 ## 11) 参数总表
 
@@ -133,7 +143,7 @@
 
 1. 先填站点无关模板：`docs/reference/parameter-methodology-template.md`
 2. 再填站点映射模板：`docs/reference/parameter-site-mapping-template.md`
-3. 按模板执行 Observe/Capture/Rebuild/Verify
+3. 按模板执行 Observe/Capture/Rebuild/Verify，补环境阶段默认走“代理日志 + `first divergence` + 最小因果单元”
 4. 可执行代码与完整链路统一放 `artifacts/tasks/<task-id>/`
 
 安全约束：`docs/reference/case-safety-policy.md`

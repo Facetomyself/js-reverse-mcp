@@ -20,8 +20,11 @@
 3. 本地补环境
    - `export_rebuild_bundle`
    - 本地执行 `env/entry.js`
-   - `diff_env_requirements`
-   - 逐项补环境直到可复现
+   - 优先读取代理 env log
+   - 记录当前 `first divergence`
+   - 按“最小因果单元”做一个补丁决策
+   - 必要时再用 `diff_env_requirements` 做辅助比对
+   - 复跑并确认 `first divergence` 是否前移
 
 4. 深挖
    - `deobfuscate_code`
@@ -31,5 +34,6 @@
 
 - 页面观察先于本地补环境
 - 本地补环境先于深度去混淆
+- 补环境默认遵循“代理日志 + `first divergence` + 最小因果单元”
 - 每一步都要写 task artifact
 - 参数名不明显时，优先靠请求、函数、时间窗和动作描述锁定目标

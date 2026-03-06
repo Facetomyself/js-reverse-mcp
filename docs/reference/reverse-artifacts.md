@@ -60,7 +60,7 @@
 如果目标是让 Python 直接调用某个签名函数，推荐产出两类不同文件：
 
 1. local rebuild 文件
-- 用于补环境、调试、定位 first divergence
+- 用于补环境、调试、读取代理 env log、定位 first divergence
 - 典型文件：`env/env.js`、`env/polyfills.js`、`env/entry.js`
 
 2. portable runtime 文件
@@ -70,7 +70,8 @@
 建议流程：
 
 1. 先在 Node local rebuild 中跑通链路
-2. 再把最小依赖提纯到 `run/exported-runtime.js`
-3. 最后让 Python `execjs`、`quickjs` 或其他宿主调用导出函数
+2. 先依据代理 env log 和 `first divergence` 完成最小因果单元补丁
+3. 再把最小依赖提纯到 `run/exported-runtime.js`
+4. 最后让 Python `execjs`、`quickjs` 或其他宿主调用导出函数
 
 不要反过来直接在 `execjs` 里做补环境，这会让调试和定位缺口变得更困难。
