@@ -129,6 +129,61 @@ function normalizeCollectedFiles(result: unknown): Array<{url: string; content: 
     }));
 }
 
+function toRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function toMirroredNetworkEntry(entry: Record<string, unknown>): Record<string, unknown> | undefined {
+  const request = toRecord(entry.request);
+  if (!request || typeof request.url !== 'string') {
+    return undefined;
+  }
+  const mirrored: Record<string, unknown> = {
+    ...(typeof entry.ts === 'string' ? {ts: entry.ts} : {}),
+    ...(typeof entry.stage === 'string' ? {stage: entry.stage} : {}),
+    ...(typeof entry.source === 'string' ? {source: entry.source} : {}),
+    request,
+  };
+  const response = toRecord(entry.response);
+  if (response) {
+    mirrored.response = response;
+  }
+  if (typeof entry.note === 'string') {
+    mirrored.note = entry.note;
+  }
+  return mirrored;
+}
+
+function toMirroredScriptEntry(entry: Record<string, unknown>): Record<string, unknown> | undefined {
+  const scriptUrl = typeof entry.scriptUrl === 'string'
+    ? entry.scriptUrl
+    : (typeof entry.url === 'string' ? entry.url : undefined);
+  const hasLocator = Boolean(toRecord(entry.locator));
+  const hasScriptId = typeof entry.scriptId === 'string';
+  if (!scriptUrl || (!hasLocator && !hasScriptId)) {
+    return undefined;
+  }
+  const mirrored: Record<string, unknown> = {
+    ...(typeof entry.ts === 'string' ? {ts: entry.ts} : {}),
+    ...(typeof entry.source === 'string' ? {source: entry.source} : {}),
+    url: scriptUrl,
+  };
+  if (hasScriptId) {
+    mirrored.scriptId = entry.scriptId;
+  }
+  const locator = toRecord(entry.locator);
+  if (locator) {
+    mirrored.locator = locator;
+  }
+  if (typeof entry.note === 'string') {
+    mirrored.note = entry.note;
+  }
+  return mirrored;
+}
+
 function buildHookTimeline(hookRecords: Array<{hookId: string; records: Array<Record<string, unknown>>}>): Array<{
   hookId: string;
   target: string;
@@ -773,10 +828,26 @@ export const recordReverseEvidence = defineTool({
       targetContext.targetFunctionNames.length > 0 ||
       targetContext.targetActionDescription.length > 0;
 
-    await task.appendLog(request.params.channel, {
+    const artifactEntry = {
       ...request.params.entry,
       ...(hasTargetContext ? {targetContext} : {}),
-    });
+    };
+
+    await task.appendLog(request.params.channel, artifactEntry);
+
+    const mirroredChannels: string[] = [];
+    if (request.params.channel === 'runtime-evidence') {
+      const mirroredNetworkEntry = toMirroredNetworkEntry(request.params.entry);
+      if (mirroredNetworkEntry) {
+        await task.appendLog('network', mirroredNetworkEntry);
+        mirroredChannels.push('network');
+      }
+      const mirroredScriptEntry = toMirroredScriptEntry(request.params.entry);
+      if (mirroredScriptEntry) {
+        await task.appendLog('scripts', mirroredScriptEntry);
+        mirroredChannels.push('scripts');
+      }
+    }
 
     if (hasTargetContext) {
       const existingTargetContext = await runtime.reverseTaskStore.readSnapshot<Record<string, unknown>>(
@@ -795,6 +866,7 @@ export const recordReverseEvidence = defineTool({
       taskId: task.taskId,
       taskDir: task.taskDir,
       channel: request.params.channel,
+      mirroredChannels,
       targetContext: hasTargetContext ? targetContext : undefined,
     }, null, 2));
     response.appendResponseLine('```');

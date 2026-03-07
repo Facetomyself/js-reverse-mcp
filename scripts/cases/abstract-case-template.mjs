@@ -1,95 +1,85 @@
-function printAbstractCaseGuide() {
-  console.log(`Case: 某东 h5st 参数
-Category: 参数签名
+function printAbstractCaseTemplate() {
+  console.log(`Case: <站点 / 参数名>
+Category: <参数签名|风控参数|设备指纹|工作流>
 Status: abstract-case
 Runtime: pure-node
 Scope: non-runnable
 
-JD h5st Abstract Case (Non-runnable)
+<Abstract Case Name> (Non-runnable)
 
-This case intentionally does NOT contain executable signing code.
-It is a high-density abstract case for reusing the JD \`h5st\` workflow without exposing task-local implementation.
+This case intentionally does NOT contain executable code.
+It is a high-density abstract template for writing reusable repository-safe reverse cases.
 
 Overview:
-- Goal: reconstruct \`h5st\`, verify server acceptance, then extract pure runtime only after \`env-pass\`.
+- Goal: <一句话说明要复现什么，以及是否需要 pure extraction / Python port>
 - Repository boundary: keep this file abstract; put executable code only in \`artifacts/tasks/<task-id>/run/\`.
 - Read order: \`docs/reference/reverse-bootstrap.md\` -> \`docs/reference/case-safety-policy.md\` -> \`docs/reference/reverse-workflow.md\` -> optional \`docs/reference/pure-extraction.md\`.
 
 Target Contract:
-- api_host_b64: \`aHR0cHM6Ly9hcGkubS5qZC5jb20vYXBp\`
-- target field: \`h5st\`
+- entry_url_b64 or api_host_b64: \`<base64>\`
+- target field: \`<field_name>\`
 - common companion fields:
-  \`appid\`, \`functionId\`, \`body\`, \`client\`, \`clientVersion\`, \`t\`, \`_stk\`, \`_ste\`, \`x-api-eid-token\`
+  \`<field_a>\`, \`<field_b>\`, \`<field_c>\`
 - likely request style:
-  signed query/body parameters sent to mobile API host
+  <query/body/header + target endpoint pattern>
 - note:
   decode Base64 before use; keep real request values task-local
 
 Success Signals:
-- one browser-observed request is confirmed carrying \`h5st\`
-- one stable initiator chain is confirmed from request back to signer entry
-- one local signer API generates non-empty \`h5st\`
+- one browser-observed request is confirmed carrying \`<field_name>\`
+- one stable initiator chain is confirmed from request back to signer / writer entry
+- one local signer API generates non-empty target value
 - one generated request passes server verification
 - if pure extraction is attempted, one fixed fixture is recorded and reusable
 
 Fast Repro Path:
-- first find one request with \`functionId\` + \`body\` + \`h5st\`
-- then trace request initiator back to signer wrapper
-- then hook signer entry and request send path together
-- then confirm \`_stk\` ordering and \`x-api-eid-token\` behavior before rebuilding
+- first find <目标请求>
+- then trace initiator back to <wrapper/signer/runtime>
+- then hook <write-point / signer boundary / send path>
+- then rebuild only enough host to make the path run
 
 Search Keywords:
 - field keywords:
-  \`h5st\`, \`_stk\`, \`_ste\`, \`x-api-eid-token\`
-- likely signer keywords:
-  \`ParamsSignMain\`, \`sign\`, \`genH5st\`, \`defaultToken\`, \`fingerprint\`, \`canvas\`, \`Date\`
-- request-shape keywords:
-  \`functionId\`, \`body\`, \`appid\`, \`clientVersion\`
+  \`<field_name>\`, \`<companion_field>\`
+- likely signer/runtime keywords:
+  \`<function_name>\`, \`<bundle_name>\`, \`<helper_name>\`
+- endpoint or route keywords:
+  \`<url_fragment>\`, \`<functionId>\`
 
 Hook Points:
-- signer entry function
-- request builder before final payload join
-- \`fetch\`
-- \`XMLHttpRequest.prototype.open\`
-- \`XMLHttpRequest.prototype.send\`
-- optional: body canonicalization helper or field-order helper
+- <recommended hook 1>
+- <recommended hook 2>
+- <recommended hook 3>
+- <recommended hook 4>
 
 Breakpoint Hints:
-- set breakpoint where string \`h5st\` is finally attached to request params
-- set breakpoint near \`_stk\` ordering logic
-- set breakpoint on signer wrapper call site such as \`ParamsSignMain.sign(...)\`
-- if multiple wrappers exist, prefer the one whose caller is nearest the target request builder
+- set breakpoint where \`<field_name>\` is finally written into request
+- set breakpoint on candidate signer wrapper call site such as \`<wrapper_call_text>\`
+- if multiple wrappers exist, prefer the one nearest the target request builder
+- if request-level tracing is noisy, break on target URL fragment first and walk upward
 
 Watch Variables:
-- request payload before sign
-- canonical field order used for sign input
-- final joined string before \`h5st\` output
-- route metadata such as \`functionId\` and \`appid\`
-- time source / timestamp input
-- token-like intermediate values
-- route-specific \`x-api-eid-token\` behavior
+- <payload before sign>
+- <canonical order / normalization result>
+- <critical intermediate value>
+- <final field value>
+- <route metadata / functionId / appid>
+- <time/random/token source>
 
 Branch Markers:
-- whether \`_stk\` is static or rebuilt per route
-- whether \`_ste\` is fixed, derived, or branch-controlled
-- whether \`x-api-eid-token\` should be empty for the current route
-- whether token source is remote, cached, or generated locally
-
-Field Shape Checklist:
-- confirm whether \`h5st\` is final joined text rather than JSON field object
-- confirm segment count and segment ordering
-- confirm whether \`_stk\` ordering directly constrains the final signer input
-- confirm whether \`_ste\` is fixed, derived, or branch-controlled
-- confirm whether \`x-api-eid-token\` is required, optional, or should stay empty for the target route
+- whether <field/order/route flag> controls signer branch
+- whether <token/source/config> is fixed, derived, remote, or cached
+- whether write happens before send or during send
+- whether host modeling changes code path
 
 Observe Phase:
 1) Find the target request:
    - First use: \`list_network_requests\`
    - Then use: \`get_network_request\`
    - Collect:
-     one successful request carrying \`h5st\` and companion fields.
+     one successful request carrying \`<field_name>\` and companion fields.
    - Must answer:
-     which endpoint consumes \`h5st\`, where the field is written, what the passing response looks like.
+     which endpoint consumes the field, where it is written, what the passing response looks like.
    - Output:
      one stable request contract and one baseline browser sample.
 
@@ -97,18 +87,16 @@ Observe Phase:
    - First use: \`get_request_initiator\`
    - Then use: \`list_scripts\`, \`get_script_source\`, \`search_in_sources\`
    - Collect:
-     business caller, request builder, signer wrapper, signer module URL, function names.
-   - Expected chain example:
-     business request builder -> wrapper -> \`ParamsSignMain.sign(...)\` or equivalent signer entry.
+     business caller, request builder, signer wrapper, runtime module URL, function names.
    - Output:
      one stable caller stack and one candidate signer boundary.
 
 3) Confirm write point:
    - First use: \`hook_function\` / \`create_hook\`
    - Collect:
-     where \`h5st\` is attached,
-     whether final payload is assembled before sign or sign after canonicalization,
-     whether signer returns whole query fragment or only one field.
+     where \`<field_name>\` is attached,
+     whether payload is assembled before sign or sign after canonicalization,
+     whether signer returns a whole query fragment or only one field.
    - Output:
      one confirmed write point and one confirmed field placement.
 
@@ -117,7 +105,7 @@ Capture Phase:
    - Collect:
      signer arguments,
      canonical field ordering,
-     body serialization style,
+     body/query/header serialization style,
      time input,
      token dependency,
      any intermediate string/buffer before final join.
@@ -129,7 +117,7 @@ Capture Phase:
 5) Record evidence:
    - First use: \`record_reverse_evidence\`
    - Record:
-     request sample, initiator, signer entry, field ordering logic, seed schema, first divergence notes.
+     request sample, initiator, signer entry, seed schema, first divergence notes.
    - Output:
      one durable timeline for rebuild and drift recovery.
 
@@ -139,14 +127,14 @@ Seed Schema Checklist:
 - time source and allowed drift window
 - random source or token source
 - fingerprint branches such as canvas / navigator / crypto
-- route-specific behavior of \`x-api-eid-token\`
-- only record shape and dependency class here; keep true values task-local
+- route-specific behavior of companion auth fields
+- only record dependency class here; keep true values task-local
 
 Rebuild Boundary:
 6) Start local pure-Node rebuild:
    - Build minimal host in \`artifacts/tasks/<task-id>/run/\`
    - Start with:
-     \`window/document/navigator/location/storage/canvas/crypto/Date\`
+     \`<window/document/navigator/location/storage/...>\`
    - Do not guess the whole browser.
    - Keep separate:
      environment shim,
@@ -160,7 +148,7 @@ Rebuild Boundary:
 7) Use proxy env logs to patch gaps:
    - First use: local proxy diagnostics
    - Observe:
-     missing browser primitives, crypto/date helpers, canvas or storage reads.
+     first missing env path, host getter crash, missing function shell, or bridge mismatch.
    - Patch rule:
      one first divergence per loop,
      one patch decision per loop,
@@ -174,8 +162,8 @@ Rebuild Boundary:
      one first divergence note per patch iteration.
 
 Negative Patterns During Patch:
-- do not fill the whole \`navigator\` because one property is missing
-- do not start from Python host before Node rebuild passes
+- do not simulate the whole browser because one property is missing
+- do not jump to Python host before Node rebuild passes
 - do not guess cookie/storage/time source without page evidence
 - do not patch multiple unrelated objects before recording current \`first divergence\`
 - do not treat \`env rebuild\` success as pure algorithm completion
@@ -183,7 +171,7 @@ Negative Patterns During Patch:
 Local API Contract:
 8) Extract local callable surface:
    - Goal surface:
-     \`genH5st(input)\` or equivalent signer function.
+     \`<genSign(...)>\` or equivalent signer function.
    - Explicit input contract should answer:
      what request fields are required,
      what route metadata is required,
@@ -204,7 +192,7 @@ Portable Runtime Gate:
    - Goal constraints:
      inline required capture and signer scripts,
      no external file reads at call time,
-     one entry such as \`genH5st(input)\`.
+     one entry such as \`<genSign(input)>\`.
    - Portable runtime is allowed to retain small version-bound constants,
      but must not still depend on full page scheduler.
    - Output:
@@ -219,19 +207,19 @@ Server Acceptance:
       business status code,
       response body preview,
       expected schema keys,
-      whether route-specific gates still pass.
+      route-specific acceptance signals.
     - Must record:
       which endpoint passed,
       which endpoint still failed,
       whether failure is signer-side or request-contract-side.
     - Output:
-      one pass/fail conclusion for generated \`h5st\`.
+      one pass/fail conclusion for generated field.
 
 Failure Triage:
 - empty signer output:
   check signer boundary and missing token/time source first
 - non-empty but server rejects:
-  check route contract, \`_stk\` order, \`x-api-eid-token\`, and body canonicalization
+  check route contract, canonical order, auth companion fields, and serialization
 - shape mismatch:
   check final join and intermediate segment assembly
 - browser and local differ early:
@@ -261,11 +249,11 @@ Pure Extraction Gate:
       and, if needed, one task-local \`run/pure_*.py\`.
 
 Pure Algorithm Key Points:
-- preserve exact canonical field ordering before trying to simplify code
-- preserve time/random controls in explicit runtimeContext
+- preserve exact canonical ordering / normalization before simplifying code
+- make time/random controls explicit in runtimeContext
 - isolate token/default-value generation from final join logic
 - do not hide route configuration inside module globals
-- keep constants boundary explicit so later drift can be localized
+- keep constants boundary explicit so later drift can be localized quickly
 
 Fixture Contract:
 12) Cross-runtime fixture alignment:
@@ -274,8 +262,8 @@ Fixture Contract:
       one fixed runtimeContext,
       one fixed expected signer output.
     - Fixture should preserve:
-      functionId/route context,
-      canonicalized body shape,
+      route context,
+      canonicalized payload shape,
       time/random controls,
       any seed class still required by signer.
     - Verify:
@@ -308,7 +296,7 @@ Drift Watchlist:
       function names,
       field order contract,
       token dependency,
-      route-specific \`x-api-eid-token\` behavior,
+      route-specific companion field behavior,
       fixed fixture output,
       server acceptance.
 
@@ -326,10 +314,10 @@ Task-local Deliverables:
 - if Python port is reached: task-local \`run/pure_*.py\` or equivalent port entry
 
 Acceptance Criteria:
-- Browser-side evidence includes at least one signed request carrying \`h5st\`.
-- One initiator chain is confirmed from request back to signer entry.
-- One local signer API can generate non-empty \`h5st\`.
-- One generated request matches expected field contract and passes server verification.
+- Browser-side evidence includes at least one request carrying target field.
+- One initiator chain is confirmed from request back to signer / writer entry.
+- One local signer API can generate non-empty target value.
+- One generated request matches expected contract and passes server verification.
 - If pure extraction is attempted, one fixed fixture is recorded and reusable.
 - If Python port exists, Python output aligns with Node pure or the difference is explicitly explained.
 - One first divergence note exists for each failed rebuild iteration.
@@ -349,4 +337,4 @@ References:
 `);
 }
 
-printAbstractCaseGuide();
+printAbstractCaseTemplate();

@@ -2,13 +2,22 @@
 
 这份模板用于沉淀单次逆向任务的结果。重点不是写长文，而是让别人能复现、续做、回看。
 
+## 开场必读
+
+开始写报告前，先确认当前任务遵守：
+
+- `docs/reference/reverse-bootstrap.md`
+- `docs/reference/case-safety-policy.md`
+- `docs/reference/reverse-workflow.md`
+- 若已进入提纯阶段，再参考 `docs/reference/pure-extraction.md`
+
 ## 1. 任务概况
 
 - 任务名称：
 - 目标页面：
 - 目标接口与字段：
 - 目标动作：
-- 当前阶段：Observe / Capture / Rebuild / Patch / DeepDive
+- 当前阶段：`Observe` / `Capture` / `Rebuild` / `Patch` / `PureExtraction` / `Port`
 - task artifact：
 
 ## 2. 已确认结论
@@ -25,7 +34,7 @@
 - 输入输出样例
 - 命中的时间窗 / 页面动作
 - 代理 env log 摘要
-- 当前 first divergence 记录
+- 当前 `first divergence` 记录
 
 ## 4. 本地复现状态
 
@@ -36,7 +45,7 @@
 - 当前补丁决策对应的最小因果单元
 - 最近一次 `diff_env_requirements` 结果（仅辅助）
 
-## 5. first divergence / 差异分析
+## 5. `first divergence` / 差异分析
 
 - 与旧版本或旧结论相比，最早分叉点在哪里
 - 分叉发生在请求、函数输出、crypto、env collect、还是最终拼接
@@ -63,7 +72,7 @@
 
 - 验证命令
 - 关键输出
-- 本轮补丁后 first divergence 是否前移
+- 本轮补丁后 `first divergence` 是否前移
 - 服务端是否通过
 - 还有哪些测试没覆盖
 

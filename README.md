@@ -12,6 +12,7 @@
 - `Breakpoint-last`
 - `Rebuild-oriented`
 - `Evidence-first`
+- `Pure-extraction-after-pass`
 
 这意味着：
 
@@ -136,7 +137,7 @@
 - `load_session_state`：从已有 JSON 或字符串重新载入会话快照。
 
 完整参数说明见 [docs/reference/tool-reference.md](docs/reference/tool-reference.md)。
-按逆向流程选工具可继续看 [docs/guides/reverse-workflow.md](docs/guides/reverse-workflow.md)。
+按逆向流程选工具可继续看 [docs/reference/reverse-workflow.md](docs/reference/reverse-workflow.md)。
 
 
 ### 外部 AI 怎么配置
@@ -269,7 +270,7 @@ GEMINI_CLI_PATH=gemini-cli
 4. local rebuild
 5. 逐项补环境
 6. first divergence 定位
-7. 深入去混淆 / 风控逻辑提纯
+7. `env-pass` 后再进入纯算法 / 风控逻辑提纯
 
 默认原则：
 
@@ -364,16 +365,19 @@ args = ["/ABSOLUTE/PATH/JSReverser-MCP/build/src/index.js"]
 
 ## 文档入口
 
+逆向相关任务开场先读：`docs/reference/reverse-bootstrap.md`。该入口会继续要求模型读取 `docs/reference/case-safety-policy.md`、`docs/reference/reverse-workflow.md`；若已进入 `env-pass` 后的提纯阶段，再读 `docs/reference/pure-extraction.md`。
+
 ### Guides
 
 - 快速开始：[docs/guides/getting-started.md](docs/guides/getting-started.md)
 - 浏览器连接：[docs/guides/browser-connection.md](docs/guides/browser-connection.md)
 - 客户端配置：[docs/guides/client-configuration.md](docs/guides/client-configuration.md)
-- 逆向工作流：[docs/guides/reverse-workflow.md](docs/guides/reverse-workflow.md)
+- 逆向工作流：[docs/reference/reverse-workflow.md](docs/reference/reverse-workflow.md)
 - 补环境规范：[docs/reference/env-patching.md](docs/reference/env-patching.md)
 
 ### Reference
 
+- 模型首读入口：[docs/reference/reverse-bootstrap.md](docs/reference/reverse-bootstrap.md)
 - 逆向任务索引：[docs/reference/reverse-task-index.md](docs/reference/reverse-task-index.md)
 - 工具参数总表：[docs/reference/tool-reference.md](docs/reference/tool-reference.md)
 - 工具读写契约：[docs/reference/tool-io-contract.md](docs/reference/tool-io-contract.md)

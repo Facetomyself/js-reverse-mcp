@@ -22,7 +22,8 @@ describe('reverse workflow docs', () => {
     const reverseIndex = await readRepoFile('docs/reference/reverse-task-index.md');
     const artifactsDoc = await readRepoFile('docs/reference/reverse-artifacts.md');
     const caseSafetyPolicy = await readRepoFile('docs/reference/case-safety-policy.md');
-    const codexDoc = await readRepoFile('docs/guides/reverse-workflow.md');
+    const reverseWorkflowDoc = await readRepoFile('docs/reference/reverse-workflow.md');
+    const reverseBootstrapDoc = await readRepoFile('docs/reference/reverse-bootstrap.md');
     const envPatchingDoc = await readRepoFile('docs/reference/env-patching.md');
     const updatePromptTemplate = await readRepoFile('docs/reference/reverse-update-prompt-template.md');
     const reverseReportTemplate = await readRepoFile('docs/reference/reverse-report-template.md');
@@ -60,13 +61,13 @@ describe('reverse workflow docs', () => {
     assert.ok(artifactsDoc.includes('可选文件'));
     assert.ok(artifactsDoc.includes('run/exported-runtime.js'));
     assert.ok(artifactsDoc.includes('portable runtime'));
-    assert.ok(codexDoc.includes('Codex'));
-    assert.ok(codexDoc.includes('Observe-first'));
-    assert.ok(codexDoc.includes('env/entry.js'));
+    assert.ok(reverseWorkflowDoc.includes('模型执行协议'));
+    assert.ok(reverseWorkflowDoc.includes('Observe-first'));
+    assert.ok(reverseWorkflowDoc.includes('env rebuild'));
     assert.ok(readme.includes('reverse-update-prompt-template'));
     assert.ok(readme.includes('reverse-report-template'));
-    assert.ok(codexDoc.includes('targetActionDescription'));
-    assert.ok(codexDoc.includes('targetContext'));
+    assert.ok(reverseBootstrapDoc.includes('第一条正式工作回复必须包含'));
+    assert.ok(reverseBootstrapDoc.includes('当前阶段'));
     assert.ok(updatePromptTemplate.includes('first divergence'));
     assert.ok(updatePromptTemplate.includes('不要猜'));
     assert.ok(reverseReportTemplate.includes('目标接口与字段'));

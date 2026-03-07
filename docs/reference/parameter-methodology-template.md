@@ -2,6 +2,23 @@
 
 更新时间：2026-03-05
 
+## 开场强制约束
+
+开始填写这个模板之前，先读：
+
+1. `docs/reference/reverse-bootstrap.md`
+2. `docs/reference/case-safety-policy.md`
+3. `docs/reference/reverse-workflow.md`
+4. 若当前任务已通过 `env-pass`，或目标是“补环境后做纯算法提纯”，继续读 `docs/reference/pure-extraction.md`
+
+填写与实现边界：
+
+- 这个模板只描述方法、输入契约、验证口径、分叉记录，不承载完整可执行实现
+- 仓库内 `scripts/cases/*` 只能沉淀抽象模板，不得写入可直接复用的完整签名链路
+- 可执行脚本、任务证据、运行日志统一放 `artifacts/tasks/<task-id>/`
+
+如果模型在开场没有先确认这些边界，就不应直接开始写 case 或写代码。
+
 ## 适用范围
 - 适用于任意“请求参数可复现”类任务（签名、令牌、时间戳衍生字段、混合指纹参数）。
 - 不绑定具体站点与参数名。

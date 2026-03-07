@@ -14,13 +14,22 @@
 - Runtime: pure-node
 - Notes: 先看工具顺序、每步产物和下一步判定，再映射到具体站点 case
 
+### 高密度抽象骨架模板
+
+- Case: [scripts/cases/abstract-case-template.mjs](abstract-case-template.mjs)
+- Category: 模板
+- Status: abstract-case
+- Runtime: pure-node
+- Notes: 新增站点 case 时先从这份高密度抽象骨架开始，补齐关键字段、hook 点、断点提示、pure extraction 关键点
+
+
 ### 某东 `h5st` 参数
 
 - Case: [scripts/cases/jd-h5st-pure-node.mjs](jd-h5st-pure-node.mjs)
 - Category: 参数签名
 - Status: abstract-case
 - Runtime: pure-node
-- Notes: Node 补环境签名链路抽象 case
+- Notes: 已覆盖从 Node 补环境、portable runtime 到 pure extraction / Python port 的抽象流程
 
 ### 某手 `falcon` 风控参数
 
@@ -36,7 +45,7 @@
 - Category: 参数签名
 - Status: abstract-case
 - Runtime: pure-node
-- Notes: 参数链路定位、工具顺序映射与纯 Node 复现抽象 case
+- Notes: 参数链路定位、工具顺序映射、纯 Node 复现与 pure extraction 后置阶段抽象 case
 
 ## 字段规范
 
@@ -48,7 +57,8 @@
 
 ## 使用约束
 
-- 优先读取这里的抽象 case
+- 新会话先读：`docs/reference/reverse-bootstrap.md`
+- 读取优先级：先读本地 `artifacts/tasks/<task-id>/`，再读这里的抽象 case
 - 如果新增公开参数 / 链路入口，统一更新本文件
 - 推荐顺序：先看通用 workflow case，再看目标站点 case
 - 真实 page/api host 不直写；统一用 Base64 文本保存，推荐字段名为 `entry_url_b64` 或 `api_host_b64`，并在使用前先解码
@@ -57,6 +67,7 @@
 
 更多工具入口请看：
 
+- [docs/reference/reverse-bootstrap.md](../../docs/reference/reverse-bootstrap.md)
 - [docs/reference/reverse-task-index.md](../../docs/reference/reverse-task-index.md)
 - [docs/reference/tool-reference.md](../../docs/reference/tool-reference.md)
 - [docs/reference/case-safety-policy.md](../../docs/reference/case-safety-policy.md)

@@ -5,7 +5,7 @@
  */
 
 import assert from 'node:assert';
-import {mkdtemp, readFile, rm} from 'node:fs/promises';
+import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {describe, it} from 'node:test';
@@ -38,6 +38,82 @@ function extractFirstJsonBlock(lines: string[]): Record<string, unknown> {
 }
 
 describe('reverse task tools', () => {
+  it('mirrors runtime evidence into network and scripts artifacts and removes template placeholders', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'js-reverse-task-mirror-'));
+    const runtime = getJSHookRuntime();
+    const originalStore = runtime.reverseTaskStore;
+
+    runtime.reverseTaskStore = new ReverseTaskStore({rootDir});
+
+    try {
+      const taskDir = path.join(rootDir, 'task-mirror');
+      await mkdir(taskDir, {recursive: true});
+      await writeFile(path.join(taskDir, 'network.jsonl'), '{"ts":"<ISO8601>","request":{"url":"<url>"}}\n', 'utf8');
+      await writeFile(path.join(taskDir, 'scripts.jsonl'), '{"ts":"<ISO8601>","url":"<script_url>"}\n', 'utf8');
+
+      const networkResponse = makeResponse();
+      await recordReverseEvidence.handler({
+        params: {
+          taskId: 'task-mirror',
+          taskSlug: 'demo',
+          targetUrl: 'https://example.com',
+          goal: 'mirror capture',
+          channel: 'runtime-evidence',
+          entry: {
+            ts: '2026-03-07T12:00:00Z',
+            stage: 'capture',
+            source: 'mcp',
+            request: {
+              method: 'GET',
+              url: 'https://example.com/api/sign?token=abc',
+              queryKeys: ['token', 'sign'],
+            },
+            response: {
+              status: 200,
+              bodyPreview: '{"ok":true}',
+            },
+            note: 'captured request',
+          },
+        },
+      } as Parameters<typeof recordReverseEvidence.handler>[0], networkResponse as unknown as Parameters<typeof recordReverseEvidence.handler>[1], {} as Parameters<typeof recordReverseEvidence.handler>[2]);
+
+      const scriptResponse = makeResponse();
+      await recordReverseEvidence.handler({
+        params: {
+          taskId: 'task-mirror',
+          taskSlug: 'demo',
+          targetUrl: 'https://example.com',
+          goal: 'mirror capture',
+          channel: 'runtime-evidence',
+          entry: {
+            ts: '2026-03-07T12:00:01Z',
+            source: 'mcp',
+            scriptId: '77',
+            url: 'https://cdn.example.com/security.js',
+            locator: {type: 'find_in_script', query: 'sign', offset: '10'},
+            note: 'candidate sign chain',
+          },
+        },
+      } as Parameters<typeof recordReverseEvidence.handler>[0], scriptResponse as unknown as Parameters<typeof recordReverseEvidence.handler>[1], {} as Parameters<typeof recordReverseEvidence.handler>[2]);
+
+      const network = (await readFile(path.join(taskDir, 'network.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+      const scripts = (await readFile(path.join(taskDir, 'scripts.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+
+      assert.strictEqual(network.length, 1);
+      assert.strictEqual(network[0].request.url, 'https://example.com/api/sign?token=abc');
+      assert.strictEqual(network[0].response.status, 200);
+      assert.strictEqual(network[0].note, 'captured request');
+
+      assert.strictEqual(scripts.length, 1);
+      assert.strictEqual(scripts[0].scriptId, '77');
+      assert.strictEqual(scripts[0].url, 'https://cdn.example.com/security.js');
+      assert.strictEqual(scripts[0].note, 'candidate sign chain');
+    } finally {
+      runtime.reverseTaskStore = originalStore;
+      await rm(rootDir, {recursive: true, force: true});
+    }
+  });
+
   it('records reverse evidence and emits rebuild-oriented guidance', async () => {
     const rootDir = await mkdtemp(path.join(tmpdir(), 'js-reverse-task-tools-'));
     const runtime = getJSHookRuntime();

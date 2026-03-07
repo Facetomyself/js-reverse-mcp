@@ -1,10 +1,15 @@
 # Case 安全规范
 
-更新时间：2026-03-05
+更新时间：2026-03-07
+
+状态：**当前生效规范**，不是历史归档文档。
+
+模型开场入口请先读：`docs/reference/reverse-bootstrap.md`
 
 ## 目标
 - 约束仓库内 `scripts/cases/*` 仅保留抽象方法，不存放可直接复用的完整逆向/签名实现。
 - 降低被直接滥用的法律与合规风险。
+- 把“仓库公开层”和“task-local 可执行层”彻底分开。
 
 ## 仓库文档分层
 
@@ -36,7 +41,7 @@
   - `runtime-evidence.jsonl`（关键证据）
   - `env/`（补环境脚本）
   - `run/`（可执行脚本与运行日志）
-  - `report.md`（结果与 first divergence）
+  - `report.md`（结果与 `first divergence`）
 - Git 提交规则：
   - 仅 `artifacts/tasks/_TEMPLATE/` 允许默认入库
   - 真实 `artifacts/tasks/<task-id>/` 默认视为本地私有任务目录，不应直接提交
@@ -47,6 +52,11 @@
 2. 若不存在对应 task，再读取 `scripts/cases/*` 抽象 case。
 3. 若仍无参考，按方法论模板新建任务并沉淀到 `artifacts/tasks/`。
 4. 如果要公开展示“有哪些参数 / 链路已沉淀”，统一更新 `scripts/cases/README.md`，不要把真实 task 目录当公开索引。
+
+## 与模型入口的关系
+- 模型新会话起手应先读 `docs/reference/reverse-bootstrap.md`
+- `reverse-bootstrap` 会强制模型继续读取本规范与阶段协议
+- `reverse-task-index`、`reverse-update-prompt-template`、参数模板都应把本规范作为开场前置，而不是可选参考
 
 ## 评审清单
 - 该 case 是否在仓库内可直接运行？

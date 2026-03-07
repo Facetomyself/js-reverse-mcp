@@ -2,6 +2,20 @@
 
 更新时间：2026-03-05
 
+## 开场强制约束
+
+开始填写站点映射前，先读：
+
+1. `docs/reference/reverse-bootstrap.md`
+2. `docs/reference/case-safety-policy.md`
+3. `docs/reference/reverse-workflow.md`
+4. 若当前任务已通过 `env-pass`，或目标是“补环境后做纯算法提纯”，继续读 `docs/reference/pure-extraction.md`
+
+边界保持一致：
+
+- 这里只补站点映射与判定口径，不写完整可执行实现
+- 仓库 case 只保留抽象映射，task-local 目录才放可运行代码
+
 ## 目标
 - 在“站点无关方法论模板”基础上，补充某站点特有映射。
 - 只记录映射关系与判定标准，不记录可执行细节。

@@ -125,6 +125,7 @@ Acceptance criteria:
 - One local rebuild chain runs in Node.
 - One first divergence note exists for each failed iteration.
 - One exported runtime surface is defined.
+- If pure extraction is attempted, one fixed fixture is recorded.
 - One generated request passes server verification.
 
 Repository boundary:

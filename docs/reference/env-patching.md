@@ -9,7 +9,7 @@
 - 代理诊断优先，盲补禁止
 - 每次补丁都要能追溯到代理日志、first divergence 与页面证据
 
-## 两阶段目标
+## 两阶段目标（现扩展为三阶段落地）
 
 本仓库默认把“本地补环境”和“外部语言调用”拆成两个阶段：
 
@@ -46,6 +46,29 @@
 - 不要一开始就用 `Python + execjs` 做补环境
 - 应该先在 Node 里补环境跑通，再导出可移植 JS
 - `execjs` 更适合“调用提纯后的函数”，不适合“调试补环境过程”
+
+### 阶段 3：纯算法提纯
+
+阶段协议与进入条件见：`docs/reference/pure-extraction.md`
+
+目标：
+
+- 在 portable runtime 已可用后，继续提纯为可读纯算法
+- 明确输入契约、随机/时间因子、固定常量和版本边界
+- 为 Node / Python / 其他宿主提供可对齐的固定夹具
+
+这一阶段的目标产物通常是：
+
+- `run/pure-*.js`
+- 可选 `run/pure_*.py`
+- task-local 固定夹具与验收记录
+
+关键原则：
+
+- 只有在 `env rebuild` 跑通且服务端验收通过后，才进入纯算法提纯
+- pure runtime 必须支持固定 runtimeContext 或同等控制项，以便跨语言对齐
+- 可以保留少量版本绑定常量，但必须在 task artifact 里标出边界
+- 纯算法实现仍属于 task-local 产物，不进入 `scripts/cases/*` 或仓库公开实现层
 
 ## 固定阶段
 
@@ -219,8 +242,15 @@
 
 - `run/exported-runtime.js`
 
-该文件的目标不是继续调试补环境，而是暴露稳定函数入口，例如：
+如果后续要继续提纯为可读纯算法，建议再补：
+
+- `run/pure-*.js`
+- 可选 `run/pure_*.py`
+- 固定夹具与服务端验收记录
+
+这些文件的目标不是继续调试补环境，而是暴露稳定函数入口并保留可对齐的纯算结果，例如：
 
 - `genSign(...)`
 - `getToken(...)`
 - `buildHeaders(...)`
+- `genABogus(pathQuery, runtimeContext)`

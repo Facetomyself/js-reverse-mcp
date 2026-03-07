@@ -41,6 +41,9 @@
 - `run/`
 - 站点专用 `env/scripts/`
 - `run/exported-runtime.js`
+- `run/pure-*.js`
+- `run/pure_*.py`
+- `run/fixtures.json`
 
 这些文件的用途：
 
@@ -75,3 +78,28 @@
 4. 最后让 Python `execjs`、`quickjs` 或其他宿主调用导出函数
 
 不要反过来直接在 `execjs` 里做补环境，这会让调试和定位缺口变得更困难。
+
+
+## 关于 pure algorithm 产物
+
+进入条件与阶段协议见：`docs/reference/pure-extraction.md`
+
+当某个任务已经从 `env rebuild` 进入纯算法提纯阶段时，建议在 task-local `run/` 下补齐以下产物：
+
+- `run/pure-*.js`：可读纯算实现
+- 可选 `run/pure_*.py`：外部语言实现
+- `run/fixtures.json` 或等价夹具：固定输入、固定 runtimeContext、固定输出
+- `report.md` 中的 pure runtime 验收记录
+
+建议在 `report.md` 中至少写明：
+
+- Pure Algorithm Status
+- Portable Runtime Status
+- Fixture Result
+- Server Acceptance
+- Drift Boundary
+
+注意：
+
+- 这些 pure algorithm 文件仍是 task-local 产物，不属于仓库公开 case
+- `scripts/cases/*` 只能描述“如何提纯”，不能直接存放某站点真实纯算实现
