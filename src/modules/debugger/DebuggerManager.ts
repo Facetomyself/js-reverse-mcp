@@ -29,6 +29,7 @@ import { WatchExpressionManager } from './WatchExpressionManager.js';
 import { XHRBreakpointManager } from './XHRBreakpointManager.js';
 import { EventBreakpointManager } from './EventBreakpointManager.js';
 import { BlackboxManager } from './BlackboxManager.js';
+import { resolveDefaultDebuggerSessionsDir } from '../../utils/projectPaths.js';
 
 /**
  * 断点信息
@@ -122,6 +123,10 @@ export class DebuggerManager {
   private breakpointResolvedListener: ((params: any) => void) | null = null;
 
   constructor(private collector: CodeCollector) {}
+
+  private getDefaultSessionsDir(): string {
+    return resolveDefaultDebuggerSessionsDir(import.meta.url);
+  }
 
   /**
    * 🆕 获取共享的 CDP Session（供子管理器使用）
@@ -1068,7 +1073,7 @@ export class DebuggerManager {
 
     // 如果未指定路径，使用默认路径
     if (!filePath) {
-      const sessionsDir = path.join(process.cwd(), 'debugger-sessions');
+      const sessionsDir = this.getDefaultSessionsDir();
       await fs.mkdir(sessionsDir, { recursive: true });
       filePath = path.join(sessionsDir, `session-${Date.now()}.json`);
     } else {
@@ -1182,7 +1187,7 @@ export class DebuggerManager {
    * 列出所有已保存的会话文件
    */
   async listSavedSessions(): Promise<Array<{ path: string; timestamp: number; metadata?: any }>> {
-    const sessionsDir = path.join(process.cwd(), 'debugger-sessions');
+    const sessionsDir = this.getDefaultSessionsDir();
 
     try {
       await fs.access(sessionsDir);

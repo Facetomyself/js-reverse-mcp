@@ -7,6 +7,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { logger } from '../../utils/logger.js';
 import type { CodeFile, CollectCodeResult } from '../../types/index.js';
+import { resolveDefaultCodeCacheDir } from '../../utils/projectPaths.js';
 
 export interface CacheEntry {
   url: string;
@@ -33,7 +34,7 @@ export class CodeCache {
   private readonly MAX_MEMORY_CACHE_SIZE = 100; // 最多 100 个条目
 
   constructor(options: CacheOptions = {}) {
-    this.cacheDir = options.cacheDir || path.join(process.cwd(), '.cache', 'code');
+    this.cacheDir = options.cacheDir || resolveDefaultCodeCacheDir(import.meta.url);
     this.maxAge = options.maxAge || 24 * 60 * 60 * 1000; // 默认24小时
     this.maxSize = options.maxSize || 100 * 1024 * 1024; // 默认100MB
   }
@@ -276,4 +277,3 @@ export class CodeCache {
     logger.info('Cache warmup completed');
   }
 }
-
