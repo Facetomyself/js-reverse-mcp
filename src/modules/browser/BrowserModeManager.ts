@@ -39,7 +39,7 @@ export class BrowserModeManager {
       useStealthScripts: config.useStealthScripts ?? true,
       stealthPreset: config.stealthPreset ?? 'windows-chrome',
       remoteDebuggingUrl: config.remoteDebuggingUrl ?? `http://127.0.0.1:${port}`,
-      autoLaunch: config.autoLaunch ?? true,
+      autoLaunch: config.autoLaunch ?? false,
       browserPath: config.browserPath ?? '',
       remoteDebuggingPort: port,
       waitForBrowserTimeoutMs: config.waitForBrowserTimeoutMs ?? 5000,

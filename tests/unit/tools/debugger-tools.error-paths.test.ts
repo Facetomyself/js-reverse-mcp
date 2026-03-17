@@ -63,6 +63,8 @@ interface PausedStateHarness {
 interface DebuggerContextHarness {
   isEnabled(): boolean;
   getPausedState?(): PausedStateHarness;
+  setXHRBreakpoint?(url: string): Promise<void>;
+  removeXHRBreakpoint?(url: string): Promise<void>;
   evaluateOnCallFrame?(callFrameId: string, expression: string): Promise<{
     exceptionDetails?: {
       text: string;
@@ -75,6 +77,7 @@ interface DebuggerContextHarness {
 
 interface ToolContextHarness {
   debuggerContext: DebuggerContextHarness;
+  ensureCollectorsInitialized(): Promise<void>;
   getSelectedPage(): {
     evaluate(script: string): Promise<unknown>;
   };
@@ -110,6 +113,7 @@ function makeDisabledContext(): ToolContextHarness {
     debuggerContext: {
       isEnabled: () => false,
     },
+    ensureCollectorsInitialized: async () => undefined,
     getSelectedPage: () => ({evaluate: async () => ({})}),
     getSelectedFrame: () => ({evaluate: async () => ({})}),
     getNetworkRequestById: () => ({url: () => 'https://example.com'}),
@@ -125,6 +129,7 @@ describe('debugger tools error paths', () => {
       debuggerContext: {
         isEnabled: () => true,
       },
+      ensureCollectorsInitialized: async () => undefined,
       getSelectedPage: () => ({evaluate: async () => ({})}),
       getSelectedFrame: () => ({
         evaluate: async (script: string) => {
@@ -212,8 +217,15 @@ describe('debugger tools error paths', () => {
             exception: {description: 'stack boom'},
           },
         }),
+        setXHRBreakpoint: async () => {
+          throw new Error('xhr set fail');
+        },
+        removeXHRBreakpoint: async () => {
+          throw new Error('xhr remove fail');
+        },
         getClient: () => null,
       },
+      ensureCollectorsInitialized: async () => undefined,
       getSelectedPage: () => ({
         evaluate: evaluateReverseScript,
       }),
@@ -247,6 +259,7 @@ describe('debugger tools error paths', () => {
     assert.ok(response.lines.some((line) => line.includes('Error: storage fail')));
     assert.ok(response.lines.some((line) => line.includes('Monitor already exists')));
     assert.ok(response.lines.some((line) => line.includes('Monitor not found')));
-    assert.ok(response.lines.filter((line) => line.includes('Debugger client not available')).length >= 2);
+    assert.ok(response.lines.some((line) => line.includes('xhr set fail')));
+    assert.ok(response.lines.some((line) => line.includes('xhr remove fail')));
   });
 });

@@ -19,6 +19,7 @@ interface BasicResponseState {
     pageSize?: number;
     pageIdx?: number;
     resourceTypes?: string[];
+    urlFilter?: string;
     includePreservedRequests?: boolean;
     networkRequestIdInDevToolsUI?: number;
   };
@@ -72,6 +73,7 @@ interface PageToolContextHarness {
   newPage(): Promise<TestPageHarness>;
   waitForEventsAfterAction(action: () => Promise<void>): Promise<void>;
   getSelectedPage(): TestPageHarness;
+  reinitDebugger(): Promise<void>;
 }
 
 interface NetworkContextHarness {
@@ -89,6 +91,16 @@ interface ScriptContextHarness {
   getSelectedPage(): TestPageHarness;
   getSelectedFrame(): TestFrameHarness;
   waitForEventsAfterAction(action: () => Promise<void>): Promise<void>;
+  debuggerContext: {
+    isEnabled(): boolean;
+    isPaused(): boolean;
+    getPausedState(): {callFrames: Array<{callFrameId: string}>};
+    evaluateOnCallFrame(
+      callFrameId: string,
+      expression: string,
+      options?: unknown,
+    ): Promise<{result: {value?: unknown}; exceptionDetails?: {text: string; exception?: {description?: string}}}>;
+  };
 }
 
 function makeResponse(): BasicResponseHarness {
@@ -127,6 +139,7 @@ describe('tools extended coverage', () => {
 
     const selected = { idx: -1 };
     const syncedPages: TestPageHarness[] = [];
+    let reinitCount = 0;
     const page: TestPageHarness = {
       currentUrl: 'https://now.example',
       bringToFront: async () => {
@@ -152,6 +165,9 @@ describe('tools extended coverage', () => {
         await action();
       },
       getSelectedPage: () => page,
+      reinitDebugger: async () => {
+        reinitCount += 1;
+      },
     };
 
     const runtime = getJSHookRuntime() as unknown as {
@@ -203,6 +219,7 @@ describe('tools extended coverage', () => {
       };
       await navigatePage.handler({ params: { type: 'reload', ignoreCache: true } }, response as unknown as Parameters<typeof navigatePage.handler>[1], context as unknown as Parameters<typeof navigatePage.handler>[2]);
       assert.ok(response.lines.some((x) => x.includes('Unable to reload')));
+      assert.strictEqual(reinitCount, 6);
     } finally {
       runtime.syncPageContext = originalSyncPageContext;
     }
@@ -222,6 +239,7 @@ describe('tools extended coverage', () => {
           pageSize: 10,
           pageIdx: 1,
           resourceTypes: ['xhr'],
+          urlFilter: '/api/',
           includePreservedRequests: true,
         },
       },
@@ -232,6 +250,21 @@ describe('tools extended coverage', () => {
     assert.strictEqual(response.state.includeNetwork, true);
     assert.ok(response.state.includeNetworkOpts);
     assert.strictEqual(response.state.includeNetworkOpts.networkRequestIdInDevToolsUI, 12);
+    assert.strictEqual(response.state.includeNetworkOpts.urlFilter, '/api/');
+
+    await listNetworkRequests.handler(
+      { params: {} },
+      response as unknown as Parameters<typeof listNetworkRequests.handler>[1],
+      context as unknown as Parameters<typeof listNetworkRequests.handler>[2],
+    );
+    assert.strictEqual(response.state.includeNetworkOpts.pageSize, 20);
+
+    await listNetworkRequests.handler(
+      { params: { reqid: 44 } },
+      response as unknown as Parameters<typeof listNetworkRequests.handler>[1],
+      context as unknown as Parameters<typeof listNetworkRequests.handler>[2],
+    );
+    assert.ok(response.attached.some((x) => 'reqid' in x && x.reqid === 44));
 
     await getNetworkRequest.handler({ params: { reqid: 33 } }, response as unknown as Parameters<typeof getNetworkRequest.handler>[1], context as unknown as Parameters<typeof getNetworkRequest.handler>[2]);
     assert.ok(response.attached.some((x) => 'reqid' in x && x.reqid === 33));
@@ -331,10 +364,16 @@ describe('tools extended coverage', () => {
       waitForEventsAfterAction: async (action: () => Promise<void>) => {
         await action();
       },
+      debuggerContext: {
+        isEnabled: () => false,
+        isPaused: () => false,
+        getPausedState: () => ({callFrames: []}),
+        evaluateOnCallFrame: async () => ({result: {value: undefined}}),
+      },
     };
 
     await evaluateScript.handler(
-      { params: { function: '() => ({ ok: true })' } },
+      { params: { function: '() => ({ ok: true })', mainWorld: false } },
       response as unknown as Parameters<typeof evaluateScript.handler>[1],
       contextSuccess as unknown as Parameters<typeof evaluateScript.handler>[2],
     );
@@ -369,11 +408,17 @@ describe('tools extended coverage', () => {
       waitForEventsAfterAction: async (action: () => Promise<void>) => {
         await action();
       },
+      debuggerContext: {
+        isEnabled: () => false,
+        isPaused: () => false,
+        getPausedState: () => ({callFrames: []}),
+        evaluateOnCallFrame: async () => ({result: {value: undefined}}),
+      },
     };
 
     await assert.rejects(async () => {
       await evaluateScript.handler(
-        { params: { function: '() => { throw new Error("x") }' } },
+        { params: { function: '() => { throw new Error("x") }', mainWorld: false } },
         response as unknown as Parameters<typeof evaluateScript.handler>[1],
         contextError as unknown as Parameters<typeof evaluateScript.handler>[2],
       );

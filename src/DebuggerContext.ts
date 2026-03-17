@@ -23,6 +23,7 @@ export interface BreakpointInfo {
   lineNumber: number;
   columnNumber: number;
   condition?: string;
+  isRegex?: boolean;
   locations: Array<{
     scriptId: string;
     lineNumber: number;
@@ -133,6 +134,7 @@ export class DebuggerContext {
   #breakpoints = new Map<string, BreakpointInfo>(); // breakpointId -> info
   #enabled = false;
   #pausedState: PausedState = {isPaused: false, callFrames: []};
+  #xhrBreakpoints = new Set<string>();
   #breakpointHitWindowMs = 2000;
   #breakpointHitThreshold = 3;
   #breakpointLoopTracker = new Map<string, {breakpointId: string; count: number; firstHitAt: number; lastHitAt: number}>();
@@ -347,42 +349,98 @@ export class DebuggerContext {
   }
 
   /**
+   * Wait for the next paused event after a step command.
+   */
+  #waitForPaused(timeoutMs = 10000): Promise<CallFrame> {
+    if (!this.#client) {
+      throw new Error('Debugger not enabled');
+    }
+
+    return new Promise<CallFrame>((resolve, reject) => {
+      const client = this.#client!;
+      const timer = setTimeout(() => {
+        client.off('Debugger.paused', onPaused);
+        reject(new Error('Timed out waiting for debugger to pause after step'));
+      }, timeoutMs);
+
+      const onPaused = (event: Protocol.Debugger.PausedEvent): void => {
+        clearTimeout(timer);
+        client.off('Debugger.paused', onPaused);
+
+        const topFrame = event.callFrames[0];
+        if (!topFrame) {
+          reject(new Error('Paused with no call frames'));
+          return;
+        }
+
+        resolve({
+          callFrameId: topFrame.callFrameId,
+          functionName: topFrame.functionName || '<anonymous>',
+          location: {
+            scriptId: topFrame.location.scriptId,
+            lineNumber: topFrame.location.lineNumber,
+            columnNumber: topFrame.location.columnNumber ?? 0,
+          },
+          url: topFrame.url || '',
+          scopeChain: [],
+          this: {
+            type: topFrame.this.type,
+            subtype: topFrame.this.subtype,
+            className: topFrame.this.className,
+            value: topFrame.this.value,
+            description: topFrame.this.description,
+            objectId: topFrame.this.objectId,
+          },
+        });
+      };
+
+      client.on('Debugger.paused', onPaused);
+    });
+  }
+
+  /**
    * Step over the next statement.
    */
-  async stepOver(): Promise<void> {
+  async stepOver(): Promise<CallFrame> {
     if (!this.#client) {
       throw new Error('Debugger not enabled');
     }
     if (!this.#pausedState.isPaused) {
       throw new Error('Execution is not paused');
     }
+    const pausedPromise = this.#waitForPaused();
     await this.#client.send('Debugger.stepOver');
+    return pausedPromise;
   }
 
   /**
    * Step into the next function call.
    */
-  async stepInto(): Promise<void> {
+  async stepInto(): Promise<CallFrame> {
     if (!this.#client) {
       throw new Error('Debugger not enabled');
     }
     if (!this.#pausedState.isPaused) {
       throw new Error('Execution is not paused');
     }
+    const pausedPromise = this.#waitForPaused();
     await this.#client.send('Debugger.stepInto');
+    return pausedPromise;
   }
 
   /**
    * Step out of the current function.
    */
-  async stepOut(): Promise<void> {
+  async stepOut(): Promise<CallFrame> {
     if (!this.#client) {
       throw new Error('Debugger not enabled');
     }
     if (!this.#pausedState.isPaused) {
       throw new Error('Execution is not paused');
     }
+    const pausedPromise = this.#waitForPaused();
     await this.#client.send('Debugger.stepOut');
+    return pausedPromise;
   }
 
   /**
@@ -531,6 +589,25 @@ export class DebuggerContext {
   }
 
   /**
+   * Resolve a script by URL and return its source.
+   * Tries exact matches first, then partial matches.
+   */
+  async getScriptSourceByUrl(
+    url: string,
+  ): Promise<{script: ScriptInfo; source: string}> {
+    const exactMatch = this.getScriptsByUrl(url).at(-1);
+    const partialMatch = this.getScriptsByUrlPattern(url).find(script => script.url);
+    const script = exactMatch ?? partialMatch;
+
+    if (!script) {
+      throw new Error(`No script found matching URL: ${url}`);
+    }
+
+    const source = await this.getScriptSource(script.scriptId);
+    return {script, source};
+  }
+
+  /**
    * Search for a string in all scripts.
    */
   async searchInScripts(
@@ -615,6 +692,7 @@ export class DebuggerContext {
       lineNumber,
       columnNumber,
       condition,
+      isRegex: false,
       locations: result.locations.map(loc => ({
         scriptId: loc.scriptId,
         lineNumber: loc.lineNumber,
@@ -661,6 +739,7 @@ export class DebuggerContext {
       lineNumber,
       columnNumber,
       condition,
+      isRegex: true,
       locations: result.locations.map(loc => ({
         scriptId: loc.scriptId,
         lineNumber: loc.lineNumber,
@@ -699,6 +778,91 @@ export class DebuggerContext {
         await this.removeBreakpoint(breakpointId);
       } catch {
         // Ignore errors for individual breakpoints
+      }
+    }
+  }
+
+  /**
+   * Re-apply saved breakpoints after the debugger is re-enabled.
+   */
+  async restoreBreakpoints(breakpoints: BreakpointInfo[]): Promise<void> {
+    if (!this.#client) {
+      return;
+    }
+
+    for (const breakpoint of breakpoints) {
+      try {
+        const params: Protocol.Debugger.SetBreakpointByUrlRequest = {
+          lineNumber: breakpoint.lineNumber,
+          columnNumber: breakpoint.columnNumber,
+        };
+
+        if (breakpoint.isRegex) {
+          params.urlRegex = breakpoint.url;
+        } else {
+          params.url = breakpoint.url;
+        }
+
+        if (breakpoint.condition) {
+          params.condition = breakpoint.condition;
+        }
+
+        const result = await this.#client.send(
+          'Debugger.setBreakpointByUrl',
+          params,
+        );
+
+        this.#breakpoints.set(result.breakpointId, {
+          breakpointId: result.breakpointId,
+          url: breakpoint.url,
+          lineNumber: breakpoint.lineNumber,
+          columnNumber: breakpoint.columnNumber,
+          condition: breakpoint.condition,
+          isRegex: breakpoint.isRegex,
+          locations: result.locations.map(loc => ({
+            scriptId: loc.scriptId,
+            lineNumber: loc.lineNumber,
+            columnNumber: loc.columnNumber ?? 0,
+          })),
+        });
+      } catch {
+        // Ignore breakpoints that cannot be restored in the new context.
+      }
+    }
+  }
+
+  async setXHRBreakpoint(url: string): Promise<void> {
+    if (!this.#client) {
+      throw new Error('Debugger not enabled');
+    }
+
+    await this.#client.send('DOMDebugger.setXHRBreakpoint', {url});
+    this.#xhrBreakpoints.add(url);
+  }
+
+  async removeXHRBreakpoint(url: string): Promise<void> {
+    if (!this.#client) {
+      throw new Error('Debugger not enabled');
+    }
+
+    await this.#client.send('DOMDebugger.removeXHRBreakpoint', {url});
+    this.#xhrBreakpoints.delete(url);
+  }
+
+  getXHRBreakpoints(): string[] {
+    return Array.from(this.#xhrBreakpoints);
+  }
+
+  async restoreXHRBreakpoints(): Promise<void> {
+    if (!this.#client) {
+      return;
+    }
+
+    for (const url of this.#xhrBreakpoints) {
+      try {
+        await this.#client.send('DOMDebugger.setXHRBreakpoint', {url});
+      } catch {
+        // Ignore XHR breakpoints that fail to restore.
       }
     }
   }

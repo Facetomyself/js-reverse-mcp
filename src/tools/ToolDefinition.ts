@@ -58,6 +58,7 @@ export interface Response {
     value: boolean,
     options?: PaginationOptions & {
       resourceTypes?: string[];
+      urlFilter?: string;
       includePreservedRequests?: boolean;
       networkRequestIdInDevToolsUI?: number;
     },
@@ -92,6 +93,7 @@ export type Context = Readonly<{
   recordedTraces(): TraceResult[];
   storeTraceRecording(result: TraceResult): void;
   getSelectedPage(): Page;
+  ensureCollectorsInitialized(): Promise<void>;
   getDialog(): Dialog | undefined;
   clearDialog(): void;
   getPageByIdx(idx: number): Page;
@@ -99,9 +101,12 @@ export type Context = Readonly<{
   newPage(): Promise<Page>;
   closePage(pageIdx: number): Promise<void>;
   selectPage(page: Page): void;
+  reinitDebugger(): Promise<void>;
   getSelectedFrame(): Frame;
   selectFrame(frame: Frame): void;
   resetSelectedFrame(): void;
+  trackInjectedScript(identifier: string, script: string): void;
+  untrackInjectedScript(identifier: string): void;
   setNetworkConditions(conditions: string | null): void;
   setCpuThrottlingRate(rate: number): void;
   saveTemporaryFile(

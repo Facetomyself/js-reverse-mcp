@@ -10,6 +10,7 @@ import path from 'node:path';
 
 import {type AggregatedIssue} from '../node_modules/chrome-devtools-frontend/mcp/mcp.js';
 
+import {getFrameCdpSession, getPageCdpSession} from './CdpSession.js';
 import {DebuggerContext} from './DebuggerContext.js';
 import {extractUrlLikeFromDevToolsTitle, urlsEqual} from './DevtoolsUtils.js';
 import type {TrafficSummary} from './formatters/websocketFormatter.js';
@@ -91,12 +92,15 @@ export class McpContext implements Context {
   #dialog?: Dialog;
   #debuggerContext: DebuggerContext = new DebuggerContext();
   #selectedFrame?: Frame;
+  #injectedScriptsByPage = new WeakMap<Page, Map<string, string>>();
 
   #traceResults: TraceResult[] = [];
   #trafficSummaryCache = new Map<number, TrafficSummary>();
 
   #locatorClass: typeof Locator;
   #options: McpContextOptions;
+  #collectorsInitialized = false;
+  #collectorsInitializationPromise?: Promise<void>;
 
   private constructor(
     browser: Browser,
@@ -149,8 +153,27 @@ export class McpContext implements Context {
     await this.createPagesSnapshot();
     await this.#networkCollector.init();
     await this.#consoleCollector.init();
+    await this.#networkCollector.initCdp();
     await this.#webSocketCollector.init();
     await this.#initDebugger();
+  }
+
+  async ensureCollectorsInitialized(): Promise<void> {
+    if (this.#collectorsInitialized) {
+      return;
+    }
+    if (!this.#collectorsInitializationPromise) {
+      this.#collectorsInitializationPromise = (async () => {
+        await this.#consoleCollector.initCdp();
+        this.#collectorsInitialized = true;
+      })().catch(error => {
+        this.#collectorsInitializationPromise = undefined;
+        this.#collectorsInitialized = false;
+        throw error;
+      });
+    }
+
+    await this.#collectorsInitializationPromise;
   }
 
   async #initDebugger(): Promise<void> {
@@ -163,14 +186,10 @@ export class McpContext implements Context {
       return;
     }
     try {
-      let client;
-      if (frame && frame !== page.mainFrame()) {
-        // @ts-expect-error client is a public getter on Frame but not in all type definitions
-        client = frame.client;
-      } else {
-        // @ts-expect-error _client is internal Puppeteer API
-        client = page._client();
-      }
+      const client =
+        frame && frame !== page.mainFrame()
+          ? getFrameCdpSession(frame)
+          : getPageCdpSession(page);
       await this.#debuggerContext.enable(client);
     } catch (error) {
       this.logger('Failed to initialize debugger context', error);
@@ -196,13 +215,29 @@ export class McpContext implements Context {
    * Call this after selecting a new page.
    */
   async reinitDebugger(): Promise<void> {
+    const breakpoints = this.#debuggerContext.getBreakpoints();
+    const xhrBreakpoints = this.#debuggerContext.getXHRBreakpoints();
     await this.#debuggerContext.disable();
     await this.#initDebugger();
+    if (breakpoints.length > 0) {
+      await this.#debuggerContext.restoreBreakpoints(breakpoints);
+    }
+    if (xhrBreakpoints.length > 0) {
+      await this.#debuggerContext.restoreXHRBreakpoints();
+    }
   }
 
   async reinitDebuggerForFrame(frame: Frame): Promise<void> {
+    const breakpoints = this.#debuggerContext.getBreakpoints();
+    const xhrBreakpoints = this.#debuggerContext.getXHRBreakpoints();
     await this.#debuggerContext.disable();
     await this.#initDebuggerForFrame(frame);
+    if (breakpoints.length > 0) {
+      await this.#debuggerContext.restoreBreakpoints(breakpoints);
+    }
+    if (xhrBreakpoints.length > 0) {
+      await this.#debuggerContext.restoreXHRBreakpoints();
+    }
   }
 
   static async from(
@@ -262,7 +297,9 @@ export class McpContext implements Context {
     this.selectPage(page);
     this.#networkCollector.addPage(page);
     this.#consoleCollector.addPage(page);
-    this.#webSocketCollector.addPage(page);
+    if (this.#collectorsInitialized) {
+      this.#webSocketCollector.addPage(page);
+    }
     return page;
   }
   async closePage(pageIdx: number): Promise<void> {
@@ -362,6 +399,25 @@ export class McpContext implements Context {
     void this.reinitDebugger();
   }
 
+  trackInjectedScript(identifier: string, script: string): void {
+    const page = this.getSelectedPage();
+    const scripts = this.#injectedScriptsByPage.get(page) ?? new Map<string, string>();
+    scripts.set(identifier, script);
+    this.#injectedScriptsByPage.set(page, scripts);
+  }
+
+  untrackInjectedScript(identifier: string): void {
+    const page = this.getSelectedPage();
+    const scripts = this.#injectedScriptsByPage.get(page);
+    if (!scripts) {
+      return;
+    }
+    scripts.delete(identifier);
+    if (scripts.size === 0) {
+      this.#injectedScriptsByPage.delete(page);
+    }
+  }
+
   getSelectedFrame(): Frame {
     return this.#selectedFrame ?? this.getSelectedPage().mainFrame();
   }
@@ -432,10 +488,9 @@ export class McpContext implements Context {
       if (devToolsPage.url().startsWith('devtools://')) {
         try {
           this.logger('Calling getTargetInfo for ' + devToolsPage.url());
-          const data = await devToolsPage
-            // @ts-expect-error no types for _client().
-            ._client()
-            .send('Target.getTargetInfo');
+          const data = await getPageCdpSession(devToolsPage).send(
+            'Target.getTargetInfo',
+          );
           const devtoolsPageTitle = data.targetInfo.title;
           const urlLike = extractUrlLikeFromDevToolsTitle(devtoolsPageTitle);
           if (!urlLike) {

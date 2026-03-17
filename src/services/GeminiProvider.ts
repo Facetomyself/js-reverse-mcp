@@ -260,9 +260,14 @@ export class GeminiProvider implements AIProvider {
       // Add prompt
       args.push(prompt);
 
+      const useShellWrapper =
+        process.platform === 'win32' &&
+        /\.(cmd|bat)$/i.test(this.cliPath);
+
       // Spawn the CLI process
       const child = spawn(this.cliPath, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
+        shell: useShellWrapper,
       });
 
       let stdout = '';

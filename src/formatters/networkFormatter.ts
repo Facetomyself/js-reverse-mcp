@@ -11,6 +11,19 @@ import type {HTTPRequest, HTTPResponse} from '../third_party/index.js';
 const BODY_CONTEXT_SIZE_LIMIT = 10000;
 const BODY_READ_TIMEOUT_MS = 3000;
 
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+    }),
+  ]);
+}
+
 export function getShortDescriptionForRequest(
   request: HTTPRequest,
   id: number,
@@ -54,12 +67,11 @@ export async function getFormattedResponseBody(
   timeoutMs = BODY_READ_TIMEOUT_MS,
 ): Promise<string | undefined> {
   try {
-    const responseBuffer = await Promise.race([
+    const responseBuffer = await withTimeout(
       httpResponse.buffer(),
-      new Promise<Buffer>((_, reject) => {
-        setTimeout(() => reject(new Error('timeout')), timeoutMs);
-      }),
-    ]);
+      timeoutMs,
+      'timeout',
+    );
 
     if (isUtf8(responseBuffer)) {
       const responseAsTest = responseBuffer.toString('utf-8');
@@ -92,7 +104,11 @@ export async function getFormattedRequestBody(
     }
 
     try {
-      const fetchData = await httpRequest.fetchPostData();
+      const fetchData = await withTimeout(
+        httpRequest.fetchPostData(),
+        BODY_READ_TIMEOUT_MS,
+        'timeout',
+      );
 
       if (fetchData) {
         return `${getSizeLimitedString(fetchData, sizeLimit)}`;

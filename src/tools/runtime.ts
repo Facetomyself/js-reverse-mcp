@@ -66,7 +66,7 @@ export function getJSHookRuntime(): JSHookRuntime {
       ? Number(process.env.REMOTE_DEBUGGING_PORT)
       : 9222,
     useStealthScripts: process.env.USE_STEALTH_SCRIPTS !== 'false',
-    autoLaunch: true,
+    autoLaunch: process.env.AUTO_LAUNCH_EXTERNAL_BROWSER === 'true',
   });
 
   const collector = new CodeCollector(toCollectorConfig(), browserManager);

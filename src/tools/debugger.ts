@@ -14,10 +14,12 @@
  * - Request initiator (call stack) analysis
  */
 
+import type {CallFrame, DebuggerContext} from '../DebuggerContext.js';
 import {zod} from '../third_party/index.js';
 
 import {ToolCategory} from './categories.js';
 import {getJSHookRuntime} from './runtime.js';
+import type {Response} from './ToolDefinition.js';
 import {defineTool} from './ToolDefinition.js';
 
 const BREAKPOINT_STALL_HINT =
@@ -110,6 +112,55 @@ async function appendDebuggerEvidence(
   await task.appendLog('runtime-evidence', entry);
 }
 
+async function appendStepSummary(
+  response: Response,
+  debugger_: DebuggerContext,
+  action: string,
+  frame: CallFrame,
+): Promise<void> {
+  const line = frame.location.lineNumber + 1;
+  const col = frame.location.columnNumber + 1;
+  const funcName = frame.functionName || '<anonymous>';
+  const url = frame.url || `script:${frame.location.scriptId}`;
+  const shortUrl = url.split('/').pop() || url;
+
+  response.appendResponseLine(
+    `${action} → ${shortUrl}:${line}:${col}, function ${funcName}`,
+  );
+
+  try {
+    const argsResult = await debugger_.evaluateOnCallFrame(
+      frame.callFrameId,
+      `(() => { try { return JSON.stringify(Array.from(arguments)).slice(0, 500); } catch (error) { return String(arguments.length) + ' args'; } })()`,
+      {returnByValue: true},
+    );
+    if (argsResult.result.value && !argsResult.exceptionDetails) {
+      response.appendResponseLine(`  args: ${argsResult.result.value}`);
+    }
+  } catch {
+    // Ignore argument extraction failures in non-function scopes.
+  }
+
+  try {
+    const source = await debugger_.getScriptSource(frame.location.scriptId);
+    const lines = source.split('\n');
+    const lineContent = lines[frame.location.lineNumber];
+    if (lineContent) {
+      const snippetLength = 200;
+      const halfWindow = Math.floor(snippetLength / 2);
+      const start = Math.max(0, frame.location.columnNumber - halfWindow);
+      const end = Math.min(lineContent.length, start + snippetLength);
+      const prefix = start > 0 ? '...' : '';
+      const suffix = end < lineContent.length ? '...' : '';
+      response.appendResponseLine(
+        `  > ${prefix}${lineContent.substring(start, end)}${suffix}`,
+      );
+    }
+  } catch {
+    // Source may be unavailable for some generated scripts.
+  }
+}
+
 /**
  * List all loaded JavaScript scripts in the current page.
  */
@@ -176,17 +227,24 @@ export const listScripts = defineTool({
 export const getScriptSource = defineTool({
   name: 'get_script_source',
   description:
-    'Gets the source code of a JavaScript script by its script ID. Supports line range (for normal files) or character offset (for minified single-line files). Use list_scripts first to find the script ID.',
+    'Gets a JavaScript script source snippet by URL (preferred) or script ID. Supports line range (for normal files) or character offset (for minified single-line files). Prefer URL because it stays stable across navigations.',
   annotations: {
     title: 'Get Script Source',
     category: ToolCategory.REVERSE_ENGINEERING,
     readOnlyHint: true,
   },
   schema: {
+    url: zod
+      .string()
+      .optional()
+      .describe(
+        'Script URL (preferred). Stable across page navigations. Exact match first, then substring match.',
+      ),
     scriptId: zod
       .string()
+      .optional()
       .describe(
-        'The script ID (from list_scripts) to get the source code for.',
+        'The script ID (from list_scripts) to get the source code for. Script IDs can change after navigation.',
       ),
     startLine: zod
       .number()
@@ -224,10 +282,26 @@ export const getScriptSource = defineTool({
       return;
     }
 
-    const {scriptId, startLine, endLine, offset, length} = request.params;
+    const {url, startLine, endLine, offset, length} = request.params;
+    let {scriptId} = request.params;
+
+    if (!url && !scriptId) {
+      response.appendResponseLine('Either url or scriptId must be provided.');
+      return;
+    }
 
     try {
-      const source = await debugger_.getScriptSource(scriptId);
+      let source: string;
+      if (url) {
+        const result = await debugger_.getScriptSourceByUrl(url);
+        source = result.source;
+        scriptId = result.script.scriptId;
+        response.appendResponseLine(
+          `Resolved URL to script ${scriptId} (${result.script.url}).\n`,
+        );
+      } else {
+        source = await debugger_.getScriptSource(scriptId!);
+      }
 
       if (!source) {
         response.appendResponseLine(`No source found for script ${scriptId}.`);
@@ -258,6 +332,24 @@ export const getScriptSource = defineTool({
         const start = (startLine ?? 1) - 1; // Convert to 0-based
         const end = endLine ?? lines.length;
         const selectedLines = lines.slice(start, end);
+        const content = selectedLines.join('\n');
+
+        if (content.length > 1000) {
+          const lineOffset = lines
+            .slice(0, start)
+            .reduce((sum, line) => sum + line.length + 1, 0);
+          response.appendResponseLine(
+            `Selected lines ${start + 1}-${Math.min(end, lines.length)} of script ${scriptId} are too large (${content.length} chars). This file is likely minified.`,
+          );
+          response.appendResponseLine(
+            `Use offset/length params instead. The character offset for line ${start + 1} is ${lineOffset}.`,
+          );
+          response.appendResponseLine('First 1000 characters:\n');
+          response.appendResponseLine('```javascript');
+          response.appendResponseLine(content.substring(0, 1000) + '...');
+          response.appendResponseLine('```');
+          return;
+        }
 
         response.appendResponseLine(
           `Source for script ${scriptId} (lines ${start + 1}-${Math.min(end, lines.length)}):\n`,
@@ -271,7 +363,7 @@ export const getScriptSource = defineTool({
       }
 
       // Full source - but warn if it's too large
-      if (source.length > 50000) {
+      if (source.length > 1000) {
         response.appendResponseLine(
           `Script ${scriptId} is large (${source.length} chars). Use offset/length or startLine/endLine to read portions.`,
         );
@@ -288,6 +380,75 @@ export const getScriptSource = defineTool({
     } catch (error) {
       response.appendResponseLine(
         `Error getting script source: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  },
+});
+
+export const saveScriptSource = defineTool({
+  name: 'save_script_source',
+  description:
+    'Saves the full source code of a JavaScript script to a local file. Useful for offline analysis of large or minified files.',
+  annotations: {
+    title: 'Save Script Source',
+    category: ToolCategory.REVERSE_ENGINEERING,
+    readOnlyHint: false,
+  },
+  schema: {
+    url: zod
+      .string()
+      .optional()
+      .describe(
+        'Script URL (preferred). Stable across page navigations. Exact match first, then substring match.',
+      ),
+    scriptId: zod
+      .string()
+      .optional()
+      .describe(
+        'Script ID (from list_scripts). Becomes invalid after page navigation, so prefer url when possible.',
+      ),
+    filePath: zod
+      .string()
+      .describe('Local file path to save the script source to.'),
+  },
+  handler: async (request, response, context) => {
+    const debugger_ = context.debuggerContext;
+
+    if (!debugger_.isEnabled()) {
+      response.appendResponseLine(
+        'Debugger is not enabled. Please select a page first.',
+      );
+      return;
+    }
+
+    const {url, scriptId, filePath} = request.params;
+    if (!url && !scriptId) {
+      response.appendResponseLine('Either url or scriptId must be provided.');
+      return;
+    }
+
+    try {
+      let source: string;
+      let resolvedId = scriptId;
+      if (url) {
+        const result = await debugger_.getScriptSourceByUrl(url);
+        source = result.source;
+        resolvedId = result.script.scriptId;
+        response.appendResponseLine(
+          `Resolved URL to script ${resolvedId} (${result.script.url}).`,
+        );
+      } else {
+        source = await debugger_.getScriptSource(scriptId!);
+      }
+
+      const data = new TextEncoder().encode(source);
+      const result = await context.saveFile(data, filePath);
+      response.appendResponseLine(
+        `Saved script source to ${result.filename} (${source.length} chars).`,
+      );
+    } catch (error) {
+      response.appendResponseLine(
+        `Error saving script source: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   },
@@ -750,6 +911,36 @@ export const removeBreakpoint = defineTool({
   },
 });
 
+export const removeAllBreakpoints = defineTool({
+  name: 'remove_all_breakpoints',
+  description: 'Removes all active breakpoints.',
+  annotations: {
+    title: 'Remove All Breakpoints',
+    category: ToolCategory.REVERSE_ENGINEERING,
+    readOnlyHint: false,
+  },
+  schema: {},
+  handler: async (_request, response, context) => {
+    const debugger_ = context.debuggerContext;
+
+    if (!debugger_.isEnabled()) {
+      response.appendResponseLine(
+        'Debugger is not enabled. Please select a page first.',
+      );
+      return;
+    }
+
+    try {
+      await debugger_.removeAllBreakpoints();
+      response.appendResponseLine('All breakpoints removed.');
+    } catch (error) {
+      response.appendResponseLine(
+        `Error removing breakpoints: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  },
+});
+
 /**
  * List all active breakpoints.
  */
@@ -822,6 +1013,7 @@ export const getRequestInitiator = defineTool({
     ...reverseTaskParamsSchema,
   },
   handler: async (request, response, context) => {
+    await context.ensureCollectorsInitialized();
     const {requestId} = request.params;
     const debugger_ = context.debuggerContext;
 
@@ -1182,10 +1374,8 @@ export const stepOver = defineTool({
     }
 
     try {
-      await debugger_.stepOver();
-      response.appendResponseLine(
-        '⏭️ Stepped over. Use get_paused_info to see current state.',
-      );
+      const frame = await debugger_.stepOver();
+      await appendStepSummary(response, debugger_, '⏭️ Stepped over', frame);
     } catch (error) {
       response.appendResponseLine(
         `Error stepping over: ${error instanceof Error ? error.message : String(error)}`,
@@ -1223,10 +1413,8 @@ export const stepInto = defineTool({
     }
 
     try {
-      await debugger_.stepInto();
-      response.appendResponseLine(
-        '⬇️ Stepped into. Use get_paused_info to see current state.',
-      );
+      const frame = await debugger_.stepInto();
+      await appendStepSummary(response, debugger_, '⬇️ Stepped into', frame);
     } catch (error) {
       response.appendResponseLine(
         `Error stepping into: ${error instanceof Error ? error.message : String(error)}`,
@@ -1264,10 +1452,8 @@ export const stepOut = defineTool({
     }
 
     try {
-      await debugger_.stepOut();
-      response.appendResponseLine(
-        '⬆️ Stepped out. Use get_paused_info to see current state.',
-      );
+      const frame = await debugger_.stepOut();
+      await appendStepSummary(response, debugger_, '⬆️ Stepped out', frame);
     } catch (error) {
       response.appendResponseLine(
         `Error stepping out: ${error instanceof Error ? error.message : String(error)}`,
@@ -2142,15 +2328,9 @@ export const breakOnXhr = defineTool({
     }
 
     const {url} = request.params;
-    const client = debugger_.getClient();
-
-    if (!client) {
-      response.appendResponseLine('Debugger client not available.');
-      return;
-    }
 
     try {
-      await client.send('DOMDebugger.setXHRBreakpoint', {url});
+      await debugger_.setXHRBreakpoint(url);
       response.appendResponseLine(
         `✅ XHR breakpoint set for URLs containing: "${url}"`,
       );
@@ -2190,15 +2370,9 @@ export const removeXhrBreakpoint = defineTool({
     }
 
     const {url} = request.params;
-    const client = debugger_.getClient();
-
-    if (!client) {
-      response.appendResponseLine('Debugger client not available.');
-      return;
-    }
 
     try {
-      await client.send('DOMDebugger.removeXHRBreakpoint', {url});
+      await debugger_.removeXHRBreakpoint(url);
       response.appendResponseLine(`✅ XHR breakpoint removed for: "${url}"`);
     } catch (error) {
       response.appendResponseLine(

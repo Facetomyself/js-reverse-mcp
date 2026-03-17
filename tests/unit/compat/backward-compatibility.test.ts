@@ -32,6 +32,7 @@ describe('Backward compatibility', () => {
 
     assert.ok(tools.length > 0);
     assert.ok(tools.some((tool) => tool.name === 'evaluate_script'));
+    assert.ok(tools.some((tool) => tool.name === 'inject_before_load'));
   });
 
   it('keeps CLI argument compatibility', () => {

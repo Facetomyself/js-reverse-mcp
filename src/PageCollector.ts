@@ -15,6 +15,7 @@ import {
   IssueAggregator,
 } from '../node_modules/chrome-devtools-frontend/mcp/mcp.js';
 
+import {getPageCdpSession} from './CdpSession.js';
 import {FakeIssuesManager} from './DevtoolsUtils.js';
 import {features} from './features.js';
 import {logger} from './logger.js';
@@ -98,6 +99,7 @@ export class PageCollector<T> {
   ) => ListenerMap<PageEvents>;
   #listeners = new WeakMap<Page, ListenerMap>();
   #maxNavigationSaved = 3;
+  #maxItemsPerNavigation = 1000;
   #includeAllPages?: boolean;
 
   /**
@@ -115,6 +117,10 @@ export class PageCollector<T> {
     this.#browser = browser;
     this.#listenersInitializer = listeners;
     this.#includeAllPages = includeAllPages;
+  }
+
+  protected async getOpenPages(): Promise<Page[]> {
+    return this.#browser.pages(this.#includeAllPages);
   }
 
   async init() {
@@ -166,6 +172,9 @@ export class PageCollector<T> {
 
       const navigations = this.storage.get(page) ?? [[]];
       navigations[0].push(withId);
+      if (navigations[0].length > this.#maxItemsPerNavigation) {
+        navigations[0].shift();
+      }
     });
 
     listeners['framenavigated'] = (frame: Frame) => {
@@ -264,16 +273,32 @@ export class ConsoleCollector extends PageCollector<
   ConsoleMessage | Error | AggregatedIssue
 > {
   #subscribedPages = new WeakMap<Page, PageIssueSubscriber>();
+  #cdpReady = false;
 
   override addPage(page: Page): void {
     super.addPage(page);
-    if (!features.issues) {
+    if (!this.#cdpReady || !features.issues) {
       return;
     }
     if (!this.#subscribedPages.has(page)) {
       const subscriber = new PageIssueSubscriber(page);
       this.#subscribedPages.set(page, subscriber);
       void subscriber.subscribe();
+    }
+  }
+
+  async initCdp(): Promise<void> {
+    if (this.#cdpReady || !features.issues) {
+      return;
+    }
+    this.#cdpReady = true;
+    const pages = await this.getOpenPages();
+    for (const page of pages) {
+      if (this.storage.has(page) && !this.#subscribedPages.has(page)) {
+        const subscriber = new PageIssueSubscriber(page);
+        this.#subscribedPages.set(page, subscriber);
+        void subscriber.subscribe();
+      }
     }
   }
 
@@ -294,8 +319,7 @@ class PageIssueSubscriber {
 
   constructor(page: Page) {
     this.#page = page;
-    // @ts-expect-error use existing CDP client (internal Puppeteer API).
-    this.#session = this.#page._client() as CDPSession;
+    this.#session = getPageCdpSession(this.#page);
   }
 
   #resetIssueAggregator() {
@@ -398,6 +422,7 @@ export class NetworkCollector extends PageCollector<HTTPRequest> {
     Page,
     (event: Protocol.Network.RequestWillBeSentEvent) => void
   >();
+  #cdpReady = false;
 
   constructor(
     browser: Browser,
@@ -417,7 +442,22 @@ export class NetworkCollector extends PageCollector<HTTPRequest> {
 
   override addPage(page: Page): void {
     super.addPage(page);
-    this.#setupInitiatorCollection(page);
+    if (this.#cdpReady) {
+      this.#setupInitiatorCollection(page);
+    }
+  }
+
+  async initCdp(): Promise<void> {
+    if (this.#cdpReady) {
+      return;
+    }
+    this.#cdpReady = true;
+    const pages = await this.getOpenPages();
+    for (const page of pages) {
+      if (this.storage.has(page)) {
+        this.#setupInitiatorCollection(page);
+      }
+    }
   }
 
   #setupInitiatorCollection(page: Page): void {
@@ -439,8 +479,7 @@ export class NetworkCollector extends PageCollector<HTTPRequest> {
 
     this.#cdpListeners.set(page, onRequestWillBeSent);
 
-    // @ts-expect-error _client is internal Puppeteer API
-    const client = page._client() as CDPSession;
+    const client = getPageCdpSession(page);
     client.on('Network.requestWillBeSent', onRequestWillBeSent);
   }
 
@@ -450,8 +489,7 @@ export class NetworkCollector extends PageCollector<HTTPRequest> {
     const listener = this.#cdpListeners.get(page);
     if (listener) {
       try {
-        // @ts-expect-error _client is internal Puppeteer API
-        const client = page._client() as CDPSession;
+        const client = getPageCdpSession(page);
         client.off('Network.requestWillBeSent', listener);
       } catch {
         // Page might already be closed
@@ -497,9 +535,13 @@ export class NetworkCollector extends PageCollector<HTTPRequest> {
     const requests = navigations[0];
 
     const lastRequestIdx = requests.findLastIndex(request => {
-      return request.frame() === page.mainFrame()
-        ? request.isNavigationRequest()
-        : false;
+      try {
+        return request.frame() === page.mainFrame()
+          ? request.isNavigationRequest()
+          : false;
+      } catch {
+        return false;
+      }
     });
 
     // Keep all requests since the last navigation request including that

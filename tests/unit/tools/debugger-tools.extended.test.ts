@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import assert from 'node:assert';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -13,10 +13,12 @@ import { ReverseTaskStore } from '../../../src/reverse/ReverseTaskStore.js';
 import {
   listScripts,
   getScriptSource,
+  saveScriptSource,
   findInScript,
   searchInSources,
   setBreakpoint,
   removeBreakpoint,
+  removeAllBreakpoints,
   listBreakpoints,
   getRequestInitiator,
   getPausedInfo,
@@ -74,11 +76,13 @@ interface DebuggerContextHarness {
   getScripts(): ScriptHarness[];
   getScriptsByUrlPattern(pattern: string): ScriptHarness[];
   getScriptSource(scriptId: string): Promise<string>;
+  getScriptSourceByUrl?(url: string): Promise<{script: ScriptHarness; source: string}>;
   getScriptById(scriptId: string): ScriptHarness | undefined;
   searchInScripts(query: string, options?: unknown): Promise<{matches: Array<{scriptId: string; url?: string; lineNumber: number; lineContent: string}>}>;
   setBreakpoint(url: string, lineNumber: number, columnNumber: number, condition?: string): Promise<BreakpointHarness>;
   setBreakpointByUrlRegex(url: string, lineNumber: number, columnNumber: number, condition?: string): Promise<BreakpointHarness>;
   removeBreakpoint(breakpointId: string): Promise<void>;
+  removeAllBreakpoints(): Promise<void>;
   getBreakpoints(): Array<{breakpointId: string; url: string; lineNumber: number; columnNumber: number; condition?: string; locations: unknown[]}>;
   getPausedState(): {
     isPaused: boolean;
@@ -95,11 +99,13 @@ interface DebuggerContextHarness {
   isPaused(): boolean;
   resume(): Promise<void>;
   pause(): Promise<void>;
-  stepOver(): Promise<void>;
-  stepInto(): Promise<void>;
-  stepOut(): Promise<void>;
+  stepOver(): Promise<{callFrameId: string; functionName?: string; location: {scriptId: string; lineNumber: number; columnNumber: number}; url?: string}>;
+  stepInto(): Promise<{callFrameId: string; functionName?: string; location: {scriptId: string; lineNumber: number; columnNumber: number}; url?: string}>;
+  stepOut(): Promise<{callFrameId: string; functionName?: string; location: {scriptId: string; lineNumber: number; columnNumber: number}; url?: string}>;
   evaluateOnCallFrame(callFrameId: string, expression: string): Promise<{result?: {value?: unknown}; exceptionDetails?: unknown}>;
   getScopeVariables(objectId: string, maxDepth?: number): Promise<Array<{name: string; value: unknown}>>;
+  setXHRBreakpoint(url: string): Promise<void>;
+  removeXHRBreakpoint(url: string): Promise<void>;
   getClient(): {send(method: string, params?: unknown): Promise<unknown>} | null;
   getLastAutoRecoveryEvent?(): {
     breakpointId: string;
@@ -111,11 +117,13 @@ interface DebuggerContextHarness {
 interface ToolContextHarness {
   getSelectedPage(): {evaluate(...args: unknown[]): Promise<unknown>; frames?(): unknown[]; mainFrame?(): unknown};
   getSelectedFrame?(): {evaluate(...args: unknown[]): Promise<unknown>};
+  ensureCollectorsInitialized(): Promise<void>;
   selectFrame?(frame: unknown): void;
   resetSelectedFrame?(): void;
   getNetworkRequestById(): {url(): string};
   getRequestInitiator(): unknown;
   debuggerContext: DebuggerContextHarness;
+  saveFile?(data: Uint8Array<ArrayBufferLike>, filename: string): Promise<{filename: string}>;
 }
 
 function makeResponse(): DebuggerResponseHarness {
@@ -144,6 +152,10 @@ function makeContext(overrides: Partial<ToolContextHarness> = {}): ToolContextHa
     getScripts: () => [],
     getScriptsByUrlPattern: () => [],
     getScriptSource: async () => '',
+    getScriptSourceByUrl: async (url: string) => ({
+      script: {scriptId: '1', url},
+      source: 'const resolved = true;',
+    }),
     getScriptById: () => ({
       scriptId: '1',
       url: 'https://a.js',
@@ -153,27 +165,32 @@ function makeContext(overrides: Partial<ToolContextHarness> = {}): ToolContextHa
     setBreakpoint: async () => ({ breakpointId: 'bp1', locations: [{ lineNumber: 1 }] }),
     setBreakpointByUrlRegex: async () => ({ breakpointId: 'bp2', locations: [] }),
     removeBreakpoint: async () => undefined,
+    removeAllBreakpoints: async () => undefined,
     getBreakpoints: () => [],
     getPausedState: () => ({ isPaused: false, callFrames: [] }),
     isPaused: () => false,
     resume: async () => undefined,
     pause: async () => undefined,
-    stepOver: async () => undefined,
-    stepInto: async () => undefined,
-    stepOut: async () => undefined,
+    stepOver: async () => ({ callFrameId: 'cf-1', functionName: 'stepOverFn', location: { scriptId: '1', lineNumber: 1, columnNumber: 0 }, url: 'https://a.js' }),
+    stepInto: async () => ({ callFrameId: 'cf-1', functionName: 'stepIntoFn', location: { scriptId: '1', lineNumber: 1, columnNumber: 0 }, url: 'https://a.js' }),
+    stepOut: async () => ({ callFrameId: 'cf-1', functionName: 'stepOutFn', location: { scriptId: '1', lineNumber: 1, columnNumber: 0 }, url: 'https://a.js' }),
     evaluateOnCallFrame: async () => ({ result: { value: 1 } }),
     getScopeVariables: async () => [],
+    setXHRBreakpoint: async () => undefined,
+    removeXHRBreakpoint: async () => undefined,
     getClient: () => ({ send: async () => undefined }),
   };
 
   return {
     getSelectedPage: () => page,
     getSelectedFrame: () => page,
+    ensureCollectorsInitialized: async () => undefined,
     selectFrame: () => undefined,
     resetSelectedFrame: () => undefined,
     getNetworkRequestById: () => ({ url: () => 'https://api.example.com' }),
     getRequestInitiator: () => undefined,
     debuggerContext,
+    saveFile: async (_data, filename) => ({ filename }),
     ...overrides,
   };
 }
@@ -185,14 +202,50 @@ describe('debugger tools extended', () => {
     context.debuggerContext.getScripts = () => [{ scriptId: '1', url: 'https://a.js' }];
     context.debuggerContext.getScriptsByUrlPattern = () => [{ scriptId: '2', url: 'https://b.js' }];
     context.debuggerContext.getScriptSource = async () => 'line1\nline2\nconst x = 1;';
+    context.debuggerContext.getScriptSourceByUrl = async () => ({
+      script: { scriptId: '3', url: 'https://cdn.example.com/main.js' },
+      source: 'const fromUrl = true;',
+    });
 
     await listScripts.handler({ params: {} }, response as unknown as Parameters<typeof listScripts.handler>[1], context as unknown as Parameters<typeof listScripts.handler>[2]);
     await listScripts.handler({ params: { filter: 'b' } }, response as unknown as Parameters<typeof listScripts.handler>[1], context as unknown as Parameters<typeof listScripts.handler>[2]);
     await getScriptSource.handler({ params: { scriptId: '2', startLine: 1, endLine: 2, length: 1000 } }, response as unknown as Parameters<typeof getScriptSource.handler>[1], context as unknown as Parameters<typeof getScriptSource.handler>[2]);
     await getScriptSource.handler({ params: { scriptId: '2', offset: 1, length: 5 } }, response as unknown as Parameters<typeof getScriptSource.handler>[1], context as unknown as Parameters<typeof getScriptSource.handler>[2]);
+    await getScriptSource.handler({ params: { url: 'main.js', startLine: 1, endLine: 1, length: 1000 } }, response as unknown as Parameters<typeof getScriptSource.handler>[1], context as unknown as Parameters<typeof getScriptSource.handler>[2]);
 
     assert.ok(response.lines.some((x) => x.includes('Found')));
+    assert.ok(response.lines.some((x) => x.includes('Resolved URL to script 3')));
     assert.ok(response.lines.some((x) => x.includes('Source for script')));
+  });
+
+  it('saves script source to a local file', async () => {
+    const response = makeResponse();
+    const context = makeContext();
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'js-reverse-save-script-'));
+    const filePath = path.join(tempDir, 'source.js');
+
+    try {
+      context.debuggerContext.getScriptSourceByUrl = async () => ({
+        script: { scriptId: '1', url: 'https://cdn.example.com/app.js' },
+        source: 'window.saved = true;',
+      });
+      context.saveFile = async (data, filename) => {
+        await writeFile(filename, Buffer.from(data));
+        return { filename };
+      };
+
+      await saveScriptSource.handler(
+        { params: { url: 'app.js', filePath } },
+        response as unknown as Parameters<typeof saveScriptSource.handler>[1],
+        context as unknown as Parameters<typeof saveScriptSource.handler>[2],
+      );
+
+      const saved = await readFile(filePath, 'utf8');
+      assert.strictEqual(saved, 'window.saved = true;');
+      assert.ok(response.lines.some((line) => line.includes('Saved script source')));
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('covers find/search/source negative and formatting paths', async () => {
@@ -248,9 +301,11 @@ describe('debugger tools extended', () => {
     await setBreakpoint.handler({ params: { url: '.*a.js', lineNumber: 3, columnNumber: 0, isRegex: true } }, response as unknown as Parameters<typeof setBreakpoint.handler>[1], context as unknown as Parameters<typeof setBreakpoint.handler>[2]);
     await listBreakpoints.handler({ params: {} }, response as unknown as Parameters<typeof listBreakpoints.handler>[1], context as unknown as Parameters<typeof listBreakpoints.handler>[2]);
     await removeBreakpoint.handler({ params: { breakpointId: 'bp-1' } }, response as unknown as Parameters<typeof removeBreakpoint.handler>[1], context as unknown as Parameters<typeof removeBreakpoint.handler>[2]);
+    await removeAllBreakpoints.handler({ params: {} }, response as unknown as Parameters<typeof removeAllBreakpoints.handler>[1], context as unknown as Parameters<typeof removeAllBreakpoints.handler>[2]);
     await getRequestInitiator.handler({ params: { requestId: 1 } }, response as unknown as Parameters<typeof getRequestInitiator.handler>[1], context as unknown as Parameters<typeof getRequestInitiator.handler>[2]);
 
     assert.ok(response.lines.some((x) => x.includes('Breakpoint set successfully')));
+    assert.ok(response.lines.some((x) => x.includes('All breakpoints removed')));
     assert.ok(response.lines.some((x) => x.includes('If execution appears stuck')));
     assert.ok(response.lines.some((x) => x.includes('Active breakpoints')));
     assert.ok(response.lines.some((x) => x.includes('Call Stack')));
@@ -277,7 +332,13 @@ describe('debugger tools extended', () => {
     });
     context.debuggerContext.isPaused = () => true;
     context.debuggerContext.getScopeVariables = async () => [{ name: 'x', value: 1 }];
-    context.debuggerContext.evaluateOnCallFrame = async () => ({ result: { value: { ok: true } } });
+    context.debuggerContext.evaluateOnCallFrame = async (_callFrameId: string, expression: string) => {
+      if (expression.includes('Array.from(arguments)')) {
+        return { result: { value: '["arg"]' } };
+      }
+      return { result: { value: { ok: true } } };
+    };
+    context.debuggerContext.getScriptSource = async () => 'function fn(arg) { return arg; }';
     context.debuggerContext.getLastAutoRecoveryEvent = () => ({ breakpointId: 'bp1', hitCount: 3, timestamp: Date.now() });
 
     await getPausedInfo.handler({ params: { includeScopes: true, maxScopeDepth: 2 } }, response as unknown as Parameters<typeof getPausedInfo.handler>[1], context as unknown as Parameters<typeof getPausedInfo.handler>[2]);
@@ -294,6 +355,8 @@ describe('debugger tools extended', () => {
     assert.ok(response.lines.some((x) => x.includes('Auto-recovery detected')));
     assert.ok(response.lines.some((x) => x.includes('SourceMap')));
     assert.ok(response.lines.some((x) => x.includes('Result')));
+    assert.ok(response.lines.some((x) => x.includes('Stepped over')));
+    assert.ok(response.lines.some((x) => x.includes('args: ["arg"]')));
     assert.ok(response.lines.some((x) => x.includes('Execution resumed') || x.includes('Pause requested')));
   });
 

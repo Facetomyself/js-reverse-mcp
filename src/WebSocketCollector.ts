@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {getPageCdpSession} from './CdpSession.js';
 import type {RequestInitiator} from './PageCollector.js';
 import type {
   Browser,
-  CDPSession,
   Page,
   Protocol,
   Target,
@@ -164,8 +164,7 @@ export class WebSocketCollector {
   }
 
   #setupCdpListeners(page: Page): void {
-    // @ts-expect-error _client is internal Puppeteer API
-    const client = page._client() as CDPSession;
+    const client = getPageCdpSession(page);
 
     const connectionMap = this.#connectionMap.get(page)!;
     const idGenerator = this.#idGenerators.get(page)!;
@@ -279,8 +278,7 @@ export class WebSocketCollector {
     const listeners = this.#cdpListeners.get(page);
     if (listeners) {
       try {
-        // @ts-expect-error _client is internal Puppeteer API
-        const client = page._client() as CDPSession;
+        const client = getPageCdpSession(page);
         client.off('Network.webSocketCreated', listeners.onCreated);
         client.off('Network.webSocketFrameSent', listeners.onFrameSent);
         client.off('Network.webSocketFrameReceived', listeners.onFrameReceived);

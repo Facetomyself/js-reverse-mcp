@@ -44,6 +44,7 @@ export class McpResponse implements Response {
     include: boolean;
     pagination?: PaginationOptions;
     resourceTypes?: ResourceType[];
+    urlFilter?: string;
     includePreservedRequests?: boolean;
     networkRequestIdInDevToolsUI?: number;
   };
@@ -69,6 +70,7 @@ export class McpResponse implements Response {
     value: boolean,
     options?: PaginationOptions & {
       resourceTypes?: ResourceType[];
+      urlFilter?: string;
       includePreservedRequests?: boolean;
       networkRequestIdInDevToolsUI?: number;
     },
@@ -88,6 +90,7 @@ export class McpResponse implements Response {
             }
           : undefined,
       resourceTypes: options?.resourceTypes,
+      urlFilter: options?.urlFilter,
       includePreservedRequests: options?.includePreservedRequests,
       networkRequestIdInDevToolsUI: options?.networkRequestIdInDevToolsUI,
     };
@@ -207,6 +210,15 @@ export class McpResponse implements Response {
     toolName: string,
     context: McpContext,
   ): Promise<Array<TextContent | ImageContent>> {
+    if (
+      this.#consoleDataOptions?.include ||
+      this.#attachedConsoleMessageId !== undefined ||
+      this.#webSocketOptions?.include ||
+      this.#attachedWebSocketId !== undefined
+    ) {
+      await context.ensureCollectorsInitialized();
+    }
+
     if (this.#includePages) {
       await context.createPagesSnapshot();
     }
@@ -406,6 +418,13 @@ export class McpResponse implements Response {
           const type = request.resourceType();
           return normalizedTypes.has(type);
         });
+      }
+
+      if (this.#networkRequestsOptions.urlFilter) {
+        const filterPattern = this.#networkRequestsOptions.urlFilter.toLowerCase();
+        requests = requests.filter(request =>
+          request.url().toLowerCase().includes(filterPattern),
+        );
       }
 
       response.push('## Network requests');

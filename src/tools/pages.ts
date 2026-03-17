@@ -69,6 +69,7 @@ export const newPage = defineTool({
         waitUntil: 'domcontentloaded',
       });
     });
+    await context.reinitDebugger();
 
     response.setIncludePages(true);
   },
@@ -175,6 +176,7 @@ export const navigatePage = defineTool({
           break;
       }
     });
+    await context.reinitDebugger();
 
     response.setIncludePages(true);
   },

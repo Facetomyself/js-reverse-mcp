@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {getPageCdpSession} from './CdpSession.js';
 import {logger} from './logger.js';
-import type {Page, Protocol, CdpPage} from './third_party/index.js';
+import type {Page, Protocol, CdpPage, CDPSession} from './third_party/index.js';
 
 export class WaitForHelper {
   #abortController = new AbortController();
   #page: CdpPage;
+  #client: CDPSession;
   #stableDomTimeout: number;
   #stableDomFor: number;
   #expectNavigationIn: number;
@@ -25,6 +27,7 @@ export class WaitForHelper {
     this.#expectNavigationIn = 100 * cpuTimeoutMultiplier;
     this.#navigationTimeout = 3000 * networkTimeoutMultiplier;
     this.#page = page as unknown as CdpPage;
+    this.#client = getPageCdpSession(page);
   }
 
   /**
@@ -100,10 +103,10 @@ export class WaitForHelper {
         resolve(true);
       };
 
-      this.#page._client().on('Page.frameStartedNavigating', listener);
+      this.#client.on('Page.frameStartedNavigating', listener);
       this.#abortController.signal.addEventListener('abort', () => {
         resolve(false);
-        this.#page._client().off('Page.frameStartedNavigating', listener);
+        this.#client.off('Page.frameStartedNavigating', listener);
       });
     });
 

@@ -34,19 +34,25 @@ const FILTERABLE_RESOURCE_TYPES: readonly [ResourceType, ...ResourceType[]] = [
 
 export const listNetworkRequests = defineTool({
   name: 'list_network_requests',
-  description: `List all requests for the currently selected page since the last navigation.`,
+  description: `List network requests for the currently selected page since the last navigation. By default returns the first 20 requests; pass reqid to get a single request's full details, or use pageSize/pageIdx/resourceTypes/urlFilter to narrow the list.`,
   annotations: {
     category: ToolCategory.NETWORK,
     readOnlyHint: true,
   },
   schema: {
+    reqid: zod
+      .number()
+      .optional()
+      .describe(
+        'The reqid of a specific network request to get full details for. If omitted, lists requests.',
+      ),
     pageSize: zod
       .number()
       .int()
       .positive()
       .optional()
       .describe(
-        'Maximum number of requests to return. When omitted, returns all requests.',
+        'Maximum number of requests to return. Defaults to 20.',
       ),
     pageIdx: zod
       .number()
@@ -62,6 +68,12 @@ export const listNetworkRequests = defineTool({
       .describe(
         'Filter requests to only return requests of the specified resource types. When omitted or empty, returns all requests.',
       ),
+    urlFilter: zod
+      .string()
+      .optional()
+      .describe(
+        'Filter requests by URL. Only requests containing this substring will be returned.',
+      ),
     includePreservedRequests: zod
       .boolean()
       .default(false)
@@ -71,14 +83,20 @@ export const listNetworkRequests = defineTool({
       ),
   },
   handler: async (request, response, context) => {
+    if (request.params.reqid !== undefined) {
+      response.attachNetworkRequest(request.params.reqid);
+      return;
+    }
+
     const data = await context.getDevToolsData();
     const reqid = data?.cdpRequestId
       ? context.resolveCdpRequestId(data.cdpRequestId)
       : undefined;
     response.setIncludeNetworkRequests(true, {
-      pageSize: request.params.pageSize,
+      pageSize: request.params.pageSize ?? 20,
       pageIdx: request.params.pageIdx,
       resourceTypes: request.params.resourceTypes,
+      urlFilter: request.params.urlFilter,
       includePreservedRequests: request.params.includePreservedRequests,
       networkRequestIdInDevToolsUI: reqid,
     });

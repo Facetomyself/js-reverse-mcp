@@ -9,7 +9,7 @@
     "clean": "node -e \"require('fs').rmSync('build', {recursive: true, force: true})\"",
     "bundle": "npm run clean && npm run build && rollup -c rollup.config.mjs",
     "build:dev": "tsc",
-    "build": "tsc && node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/post-build.ts",
+    "build": "npm run clean && tsc && node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/post-build.ts",
     "typecheck": "tsc --noEmit",
     "format": "eslint --cache --fix . && prettier --write --cache .",
     "check-format": "eslint --cache . && prettier --check --cache .;",
@@ -52,6 +52,7 @@
   "homepage": "https://github.com/zhizhuodemao/js-reverse-mcp#readme",
   "mcpName": "io.github.zhizhuodemao/js-reverse-mcp",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.21.1",
     "@anthropic-ai/sdk": "^0.32.1",
     "@babel/generator": "^7.26.5",
     "@babel/parser": "^7.26.5",
@@ -60,16 +61,18 @@
     "axios": "^1.13.5",
     "chalk": "^5.6.2",
     "cheerio": "^1.2.0",
+    "core-js": "3.47.0",
+    "debug": "4.4.3",
     "dotenv": "^16.4.7",
     "openai": "^4.73.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "sm-crypto": "^0.4.0",
-    "xbogus": "^1.0.2"
+    "xbogus": "^1.0.2",
+    "yargs": "18.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
-    "@modelcontextprotocol/sdk": "1.21.1",
     "@rollup/plugin-commonjs": "^29.0.0",
     "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
@@ -84,9 +87,7 @@
     "@typescript-eslint/eslint-plugin": "^8.43.0",
     "@typescript-eslint/parser": "^8.43.0",
     "chrome-devtools-frontend": "1.0.1547571",
-    "core-js": "3.47.0",
     "c8": "^10.1.3",
-    "debug": "4.4.3",
     "eslint": "^9.35.0",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import": "^2.32.0",
@@ -99,8 +100,7 @@
     "rollup-plugin-license": "^3.6.0",
     "sinon": "^21.0.0",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.43.0",
-    "yargs": "18.0.0"
+    "typescript-eslint": "^8.43.0"
   },
   "engines": {
     "node": "^20.19.0 || ^22.12.0 || >=23"

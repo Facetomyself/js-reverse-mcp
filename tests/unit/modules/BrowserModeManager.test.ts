@@ -29,6 +29,7 @@ interface BrowserModeManagerHarness {
   sessionData?: { cookies?: Array<{ name: string; value: string }> };
   autoLaunched?: boolean;
   browserProcess?: { killed: boolean; kill(): void };
+  config?: { autoLaunch: boolean };
   launch(): Promise<BrowserLike>;
   newPage(): Promise<PageLike>;
   goto(url: string, page?: PageLike): Promise<void>;
@@ -39,6 +40,19 @@ interface BrowserModeManagerHarness {
 }
 
 describe('BrowserModeManager (mocked)', () => {
+  it('defaults autoLaunch to false unless explicitly enabled', () => {
+    const managerDefault = new BrowserModeManager({
+      useStealthScripts: false,
+    }) as unknown as BrowserModeManagerHarness;
+    const managerExplicit = new BrowserModeManager({
+      useStealthScripts: false,
+      autoLaunch: true,
+    }) as unknown as BrowserModeManagerHarness;
+
+    assert.strictEqual(managerDefault.config?.autoLaunch, false);
+    assert.strictEqual(managerExplicit.config?.autoLaunch, true);
+  });
+
   it('reuses connected browser in launch', async () => {
     const manager = new BrowserModeManager({
       useStealthScripts: false,

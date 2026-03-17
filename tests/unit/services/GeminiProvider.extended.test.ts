@@ -35,9 +35,15 @@ type TimeoutCallback = (...args: []) => void;
 type TimerOverride = (callback: TimeoutCallback, ms?: number) => TimeoutLike;
 
 function makeCliScript(dir: string, name: string, body: string): string {
-  const p = join(dir, name);
-  writeFileSync(p, `#!/usr/bin/env bash\n${body}\n`);
-  chmodSync(p, 0o755);
+  const extension = process.platform === 'win32' ? '.cmd' : '.sh';
+  const p = join(dir, `${name}${extension}`);
+  const content = process.platform === 'win32'
+    ? `@echo off\r\n${body}\r\n`
+    : `#!/usr/bin/env bash\n${body}\n`;
+  writeFileSync(p, content);
+  if (process.platform !== 'win32') {
+    chmodSync(p, 0o755);
+  }
   return p;
 }
 
@@ -56,8 +62,17 @@ describe('GeminiProvider extended', () => {
     tempDirs.push(dir);
     const cli = makeCliScript(
       dir,
-      'gemini-ok.sh',
-      `
+      'gemini-ok',
+      process.platform === 'win32'
+        ? `
+if "%1"=="--version" (
+  echo 1.0.0
+  exit /b 0
+)
+echo   OK_RESPONSE  
+exit /b 0
+`
+        : `
 if [ "$1" = "--version" ]; then
   echo "1.0.0"
   exit 0
@@ -90,8 +105,16 @@ exit 0
     tempDirs.push(dir);
     const cli = makeCliScript(
       dir,
-      'gemini-img.sh',
-      `
+      'gemini-img',
+      process.platform === 'win32'
+        ? `
+if "%1"=="--version" (
+  exit /b 0
+)
+echo IMAGE_OK
+exit /b 0
+`
+        : `
 if [ "$1" = "--version" ]; then
   exit 0
 fi
@@ -119,8 +142,16 @@ exit 0
     tempDirs.push(dir);
     const cli = makeCliScript(
       dir,
-      'gemini-fail.sh',
-      `
+      'gemini-fail',
+      process.platform === 'win32'
+        ? `
+if "%1"=="--version" (
+  exit /b 0
+)
+echo bad stderr 1>&2
+exit /b 2
+`
+        : `
 if [ "$1" = "--version" ]; then
   exit 0
 fi
@@ -187,8 +218,16 @@ exit 2
     tempDirs.push(dir);
     const cli = makeCliScript(
       dir,
-      'gemini-timeout.sh',
-      `
+      'gemini-timeout',
+      process.platform === 'win32'
+        ? `
+if "%1"=="--version" (
+  exit /b 0
+)
+echo DONE
+exit /b 0
+`
+        : `
 if [ "$1" = "--version" ]; then
   exit 0
 fi
@@ -219,7 +258,28 @@ exit 0
   });
 
   it('covers executeCLI timeout rejection path', async () => {
-    const provider = new GeminiProvider({ cliPath: '/bin/sh', useAPI: false }) as unknown as GeminiProviderHarness;
+    const dir = mkdtempSync(join(tmpdir(), 'gemini-cli-hang-'));
+    tempDirs.push(dir);
+    const cli = makeCliScript(
+      dir,
+      'gemini-hang',
+      process.platform === 'win32'
+        ? `
+if "%1"=="--version" (
+  exit /b 0
+)
+ping -n 6 127.0.0.1 >nul
+exit /b 0
+`
+        : `
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+sleep 5
+exit 0
+`,
+    );
+    const provider = new GeminiProvider({ cliPath: cli, useAPI: false }) as unknown as GeminiProviderHarness;
 
     const originalSetTimeout = globalThis.setTimeout;
     const originalClearTimeout = globalThis.clearTimeout;
